@@ -1,0 +1,15 @@
+#remove pycache - 
+__pycache__/
+*.py[cod]
+*$py.class
+
+#remove venv
+.venv
+
+# models
+*.pth
+*.pt
+saved_models/
+data/
+
+data/
