@@ -13,3 +13,5 @@ saved_models/
 data/
 
 data/
+server/node_modules/
+client/node_modules/
