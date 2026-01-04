@@ -74,3 +74,21 @@ def print_regions(checker, text_a, text_b, filename_a, filename_b, high_thresh=0
         print(f"{filename_b} Chunks {start_b}-{end_b}")
         region_text_b = " ".join(chunks_b[start_b : end_b+1])
         print(f"\"{region_text_b}\"")
+
+def save_embeddings(embeddings_db, path='embeddings.pth'):
+    #Save the embeddings dictionary to disk
+    print(f"Saving database to {path}...")
+    torch.save(embeddings_db, path)
+
+def load_embeddings(path='embeddings.pth'):
+    #Load the embeddings dictionary from disk if it exists
+    if os.path.exists(path):
+        print(f"Loading database from {path}...")
+        try:
+             # Use weights_only=False locally as we trust our own file
+             return torch.load(path, weights_only=False) 
+        except:
+             # Fallback for older pytorch versions / if argument not supported
+             print("Failed to load embeddings with weights_only=False. Falling back to default.")
+             return torch.load(path)
+    return {}

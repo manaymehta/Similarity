@@ -74,7 +74,7 @@ class PlagiarismChecker:
         return torch.mean(top_k_values).item()
 
     # expands the target regions to include similar chunks, increase the range of the regions
-    def find_similarity_regions(self, text_a, text_b, high_threshold, low_threshold):
+    def find_similarity_regions(self, text_a, text_b, high_threshold, low_threshold, vecs_a=None, vecs_b=None):
         # Returns a list of dicts: {'a_start': int, 'a_end': int, 'b_start': int, 'b_end': int, 'score': float}
         chunks_a = self.chunk_text(text_a)
         chunks_b = self.chunk_text(text_b)
@@ -82,8 +82,13 @@ class PlagiarismChecker:
         if not chunks_a or not chunks_b:
             return []
             
-        vecs_a = self.get_document_embedding(text_a).to(self.device)
-        vecs_b = self.get_document_embedding(text_b).to(self.device)
+        if vecs_a is None:
+            vecs_a = self.get_document_embedding(text_a)
+        if vecs_b is None:
+            vecs_b = self.get_document_embedding(text_b)
+            
+        vecs_a = vecs_a.to(self.device)
+        vecs_b = vecs_b.to(self.device)
         
         sim_matrix = torch.mm(vecs_a, vecs_b.T)
         rows, cols = sim_matrix.size()
@@ -144,3 +149,84 @@ class PlagiarismChecker:
             })
             
         return regions
+
+    def get_regions_with_text(self, text_a, text_b, high_threshold=0.6, low_threshold=0.5, vecs_a=None, vecs_b=None):
+        
+        raw_regions = self.find_similarity_regions(text_a, text_b, high_threshold, low_threshold, vecs_a, vecs_b)
+        
+        if not raw_regions:
+            return []
+            
+        chunks_a = self.chunk_text(text_a)
+        chunks_b = self.chunk_text(text_b)
+        
+        processed_regions = []
+        for region in raw_regions:
+            try:
+                # Reconstruct text from chunks
+                text_a_content = " ".join(chunks_a[region['a_start'] : region['a_end']+1])
+                text_b_content = " ".join(chunks_b[region['b_start'] : region['b_end']+1])
+                
+                processed_regions.append({
+                    'a_start': region['a_start'],
+                    'a_end': region['a_end'],
+                    'b_start': region['b_start'],
+                    'b_end': region['b_end'],
+                    'score': region['score'],
+                    'text_a': text_a_content,
+                    'text_b': text_b_content
+                })
+            except IndexError:
+                continue
+                
+        return processed_regions
+
+    def compare_batch(self, documents, ids, threshold=0.1):
+        """
+        Efficiently compares a batch of documents.
+        documents: List of text strings
+        ids: List of identifiers (filenames) corresponding to documents
+        Returns: List of comparison results
+        """
+        n = len(documents)
+        if n < 2:
+            return []
+
+        # 1. Pre-compute all embeddings
+        embeddings = []
+        for doc in documents:
+            embeddings.append(self.get_document_embedding(doc))
+        
+        results = []
+        
+        # 2. Compare all pairs
+        for i in range(n):
+            for j in range(i + 1, n):
+                # Using pre-computed embeddings
+                # Note: embeddings[i] is on CPU due to get_document_embedding returning .cpu()
+                # We need to move them to device for comparison
+                vec_a = embeddings[i].to(self.device)
+                vec_b = embeddings[j].to(self.device)
+                
+                # Check similarity
+                score = self.compare_documents(vec_a, vec_b)
+                
+                if score >= threshold:
+                    # Get regions (this needs re-computation of chunks, but only for high sim pairs)
+                    regions = self.get_regions_with_text(
+                        documents[i], 
+                        documents[j], 
+                        high_threshold=0.6, 
+                        low_threshold=0.5,
+                        vecs_a=embeddings[i],
+                        vecs_b=embeddings[j]
+                    )
+                    
+                    results.append({
+                        "file1": ids[i],
+                        "file2": ids[j],
+                        "score": score,
+                        "regions": regions
+                    })
+                    
+        return results

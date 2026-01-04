@@ -1,17 +1,42 @@
-#remove pycache - 
+# --- Python (ML Service) ---
 __pycache__/
 *.py[cod]
 *$py.class
-
-#remove venv
-.venv
-
-# models
+.venv/
+venv/
 *.pth
 *.pt
 saved_models/
-data/
+ml-service/data/
 
-data/
-server/node_modules/
-client/node_modules/
+# --- Node.js (Server & Client) ---
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+# Keep package-lock if you want consistent installs, but often ignored in mixed repos if using yarn. 
+# Re-adding package-lock.json to keep it implies we monitor it. If user wants to ignore it:
+# package-lock.json
+
+# --- Build Outputs ---
+dist/
+build/
+server/dist/
+client/dist/
+client/build/
+
+# --- Environment Variables ---
+.env
+.env.local
+.env.*.local
+
+# --- IDE & System ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Logs & Coverage ---
+logs/
+coverage/
+*.log
