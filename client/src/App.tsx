@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Home } from './pages/Home';
 import { Report } from './pages/Report';
+import { GroupList } from './pages/GroupList';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
 
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/groups" element={<GroupList />} />
             <Route path="/report/:scanId" element={<Report />} />
           </Routes>
         </main>

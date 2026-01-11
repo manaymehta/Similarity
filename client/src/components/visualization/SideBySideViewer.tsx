@@ -1,18 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { ComparisonResult, ScanGroup } from '../../services/api';
+import type { ComparisonResult } from '../../services/api';
 
 interface SideBySideViewerProps {
     result: ComparisonResult;
-    files: ScanGroup['files'];
+    file1Content: string;
+    file2Content: string;
     onClose: () => void;
 }
 
-export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, files, onClose }) => {
+export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file1Content, file2Content, onClose }) => {
     const [currentRegionIndex, setCurrentRegionIndex] = useState(0);
-    const file1Content = files.find(f => f.filename === result.file1)?.content || "Content not found";
-    const file2Content = files.find(f => f.filename === result.file2)?.content || "Content not found";
-
     const regions = result.regions || [];
     const hasRegions = regions.length > 0;
 
@@ -34,13 +32,14 @@ export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file
         if (activeRef2.current) activeRef2.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, [currentRegionIndex]);
 
-    // escapeRegExp helper
-    const escapeRegExp = (string: string) => {
-        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    };
-
-    const HighlightedText = ({ content, matchText, isRef }: { content: string, matchText?: string, isRef?: React.RefObject<HTMLSpanElement | null> }) => {
-        if (!matchText || !matchText.trim()) {
+    const HighlightedText = ({ content, regions, activeIndex, isFile1, activeRef }: {
+        content: string,
+        regions: any[],
+        activeIndex: number,
+        isFile1: boolean,
+        activeRef: React.RefObject<HTMLSpanElement | null>
+    }) => {
+        if (!regions || regions.length === 0) {
             return (
                 <pre className="whitespace-pre-wrap font-sans text-sm text-slate-300 leading-relaxed">
                     {content}
@@ -48,31 +47,35 @@ export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file
             );
         }
 
-        // 1. Split match text into words
-        const words = matchText.trim().split(/\s+/);
-        // 2. Create regex with flexible whitespace
-        const patternString = words.map(escapeRegExp).join('[\\s\\r\\n]+');
-        const regex = new RegExp(`(${patternString})`, 'gi');
+        // Sort regions by start char to handle sequential rendering (assuming no overlap for simplicity or taken care of)
+        // For the active region, we definitely highlight. 
+        // For context, we might highlight others? For now, let's just highlight the ACTIVELY selected region to avoid clutter.
 
-        const parts = content.split(regex);
+        const activeRegion = regions[activeIndex];
+        if (!activeRegion) return <pre>{content}</pre>;
+
+        const startChar = isFile1 ? activeRegion.a_start_char : activeRegion.b_start_char;
+        const endChar = isFile1 ? activeRegion.a_end_char : activeRegion.b_end_char;
+
+        // Safety check
+        if (startChar === undefined || endChar === undefined || startChar < 0 || endChar > content.length) {
+            return <pre>{content}</pre>;
+        }
+
+        const pre = content.substring(0, startChar);
+        const match = content.substring(startChar, endChar);
+        const post = content.substring(endChar);
 
         return (
             <pre className="whitespace-pre-wrap font-sans text-sm text-slate-300 leading-relaxed">
-                {parts.map((part, i) => {
-                    // split with capture group: odd indices are matches
-                    if (i % 2 === 1) {
-                        return (
-                            <span
-                                key={i}
-                                ref={i === 1 ? isRef : null}
-                                className="bg-yellow-500/40 text-yellow-100 rounded px-0.5 border-b border-yellow-500"
-                            >
-                                {part}
-                            </span>
-                        );
-                    }
-                    return <React.Fragment key={i}>{part}</React.Fragment>;
-                })}
+                {pre}
+                <span
+                    ref={activeRef}
+                    className="bg-yellow-500/40 text-yellow-100 rounded px-0.5 border-b border-yellow-500"
+                >
+                    {match}
+                </span>
+                {post}
             </pre>
         );
     };
@@ -128,8 +131,10 @@ export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file
                         <div className="flex-1 overflow-y-auto p-6 bg-slate-900 scrollbar-thin scrollbar-thumb-slate-700">
                             <HighlightedText
                                 content={file1Content}
-                                matchText={regions[currentRegionIndex]?.text_a}
-                                isRef={activeRef1}
+                                regions={regions}
+                                activeIndex={currentRegionIndex}
+                                isFile1={true}
+                                activeRef={activeRef1}
                             />
                         </div>
                     </div>
@@ -144,8 +149,10 @@ export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file
                         <div className="flex-1 overflow-y-auto p-6 bg-slate-900 scrollbar-thin scrollbar-thumb-slate-700">
                             <HighlightedText
                                 content={file2Content}
-                                matchText={regions[currentRegionIndex]?.text_b}
-                                isRef={activeRef2}
+                                regions={regions}
+                                activeIndex={currentRegionIndex}
+                                isFile1={false}
+                                activeRef={activeRef2}
                             />
                         </div>
                     </div>

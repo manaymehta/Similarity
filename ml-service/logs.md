@@ -533,3 +533,5 @@ Region #4 (Avg Score: 0.6015)
 
 [student3.txt Chunks 0-0]:
 "The Secular Priesthood: Clinical Authority and the Mythology of the White Coat For centuries, the medical profession has occupied a unique stratum in the social hierarchy, one that transcends the mere application of biological science. The physician is not viewed simply as a high-level technician or a biological engineer; rather, they have been cast in the role of a "secular priest." This elevation is"
+
+![alt text](image.png)

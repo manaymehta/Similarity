@@ -2,17 +2,17 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud, AlertCircle } from 'lucide-react';
 import { FileDropZone, UploadList } from '../components/upload/FileDropZone';
-import { uploadFiles } from '../services/api';
+import { createGroup } from '../services/api';
 import clsx from 'clsx';
 
 export const Home: React.FC = () => {
     const navigate = useNavigate();
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [groupName, setGroupName] = useState('');
     const [isUploading, setIsUploading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const handleFilesSelected = (files: File[]) => {
-        // Deduplicate files by name
         const newFiles = [...selectedFiles, ...files].filter(
             (file, index, self) =>
                 index === self.findIndex((f) => f.name === file.name)
@@ -35,13 +35,13 @@ export const Home: React.FC = () => {
         setError(null);
 
         try {
-            const response = await uploadFiles(selectedFiles);
-            // Navigate to report page on success
-            navigate(`/report/${response.scanId}`);
+            const group = await createGroup(selectedFiles, groupName);
+            // Navigate to report page (using group ID as scan ID)
+            navigate(`/report/${group._id}`);
         } catch (err: any) {
             console.error("Upload failed", err);
             setError(
-                err.response?.data?.message || "Failed to upload files. Please try again."
+                err.response?.data?.message || "Failed to create group. Please try again."
             );
             setIsUploading(false);
         }
@@ -51,7 +51,13 @@ export const Home: React.FC = () => {
         <div className="min-h-[80vh] flex flex-col items-center justify-center p-6">
             <div className="w-full max-w-3xl space-y-8">
                 {/* Header */}
-                <div className="text-center space-y-4">
+                <div className="text-center space-y-4 relative">
+                    <button
+                        onClick={() => navigate('/groups')}
+                        className="absolute right-0 top-0 text-slate-400 hover:text-white text-sm font-medium transition-colors"
+                    >
+                        View Past Scans &rarr;
+                    </button>
                     <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent pb-1">
                         Similarity Detector
                     </h1>
@@ -62,6 +68,19 @@ export const Home: React.FC = () => {
 
                 {/* Main Card */}
                 <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl shadow-blue-900/10 backdrop-blur-sm">
+
+                    {/* Group Name Input */}
+                    <div className="mb-6">
+                        <label className="block text-sm font-medium text-slate-400 mb-2">Group Name (Optional)</label>
+                        <input
+                            type="text"
+                            value={groupName}
+                            onChange={(e) => setGroupName(e.target.value)}
+                            placeholder="e.g. 'History Assignment 1'"
+                            className="w-full bg-slate-800 border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        />
+                    </div>
+
                     <FileDropZone
                         onFilesSelected={handleFilesSelected}
                         disabled={isUploading}
@@ -91,12 +110,12 @@ export const Home: React.FC = () => {
                             {isUploading ? (
                                 <>
                                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    <span>Scanning...</span>
+                                    <span>Processing...</span>
                                 </>
                             ) : (
                                 <>
                                     <UploadCloud className="w-5 h-5 group-hover:animate-bounce" />
-                                    <span>Start Analysis</span>
+                                    <span>Create Group & Analyze</span>
                                 </>
                             )}
                         </button>

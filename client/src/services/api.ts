@@ -1,10 +1,11 @@
 import axios from 'axios';
 
 // --- Types (to be moved to shared types later) ---
-export interface ScanGroup {
+export interface Group {
     _id: string;
+    name: string;
     status: 'pending' | 'processing' | 'completed' | 'failed';
-    files: Array<{ filename: string; content?: string }>;
+    files: Array<{ filename: string; hash: string }>;
     createdAt: string;
 }
 
@@ -16,13 +17,17 @@ export interface Region {
     score: number;
     text_a: string;
     text_b: string;
+    a_start_char: number;
+    a_end_char: number;
+    b_start_char: number;
+    b_end_char: number;
 }
 
 export interface ComparisonResult {
     file1: string;
     file2: string;
     score: number;
-    regions: Region[]; // This might need refinement based on exact backend response
+    regions: Region[];
 }
 
 // --- API Client ---
@@ -36,36 +41,53 @@ const apiClient = axios.create({
 // --- Service Functions ---
 
 /**
- * Upload files for scanning.
- * @param files FileList or Array of File objects
+ * Create a new group with files.
  */
-export const uploadFiles = async (files: File[]): Promise<{ scanId: string }> => {
+export const createGroup = async (files: File[], groupName?: string): Promise<Group> => {
     const formData = new FormData();
+    if (groupName) formData.append('groupName', groupName);
     files.forEach((file) => {
-        formData.append('documents', file);
+        formData.append('files', file);
     });
 
-    // Note: Content-Type: multipart/form-data is set automatically by axios when data is FormData
-    const response = await apiClient.post<{ scanId: string }>('/scan/upload', formData, {
+    const response = await apiClient.post<Group>('/groups', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     });
     return response.data;
 };
 
 /**
- * Get the status of a specific scan group.
+ * Get all groups.
  */
-export const getScanStatus = async (scanId: string): Promise<ScanGroup> => {
-    const response = await apiClient.get<ScanGroup>(`/scan/${scanId}/status`);
+export const getGroups = async (): Promise<Group[]> => {
+    const response = await apiClient.get<Group[]>('/groups');
     return response.data;
 };
 
 /**
- * Get the comparison results for a completed scan.
+ * Get details of a specific group.
  */
-export const getScanResults = async (scanId: string): Promise<ComparisonResult[]> => {
-    const response = await apiClient.get<ComparisonResult[]>(`/scan/${scanId}/results`);
+export const getGroupDetails = async (groupId: string): Promise<Group> => {
+    const response = await apiClient.get<Group>(`/groups/${groupId}`);
     return response.data;
+};
+
+/**
+ * Get the results for a group.
+ */
+export const getGroupResults = async (groupId: string): Promise<ComparisonResult[]> => {
+    const response = await apiClient.get<ComparisonResult[]>(`/groups/${groupId}/results`);
+    return response.data;
+};
+
+/**
+ * Get content of a specific file in a group.
+ */
+export const getFileContent = async (groupId: string, filename: string): Promise<string> => {
+    const response = await apiClient.get<{ content: string }>(`/groups/${groupId}/files/content`, {
+        params: { filename }
+    });
+    return response.data.content;
 };
 
 export default apiClient;

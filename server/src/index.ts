@@ -2,7 +2,7 @@ import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
-import scanRoutes from './routes/scanRoutes.js';
+
 
 dotenv.config();
 
@@ -13,8 +13,11 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+import groupsRoutes from './routes/groupsRoutes.js';
+
 // Routes
-app.use('/api/scan', scanRoutes);
+app.use('/api/groups', groupsRoutes);
+
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', message: 'Server is running' });
