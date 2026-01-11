@@ -150,7 +150,7 @@ class PlagiarismChecker:
             
         return regions
 
-    def get_regions_with_text(self, text_a, text_b, high_threshold=0.6, low_threshold=0.5, vecs_a=None, vecs_b=None):
+    def get_regions_with_text(self, text_a, text_b, high_threshold, low_threshold, vecs_a=None, vecs_b=None):
         
         raw_regions = self.find_similarity_regions(text_a, text_b, high_threshold, low_threshold, vecs_a, vecs_b)
         

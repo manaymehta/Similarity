@@ -32,7 +32,8 @@ const processScanGroup = async (scanGroupId: string) => {
                 scanGroupId: scanGroup._id,
                 file1: res.file1,
                 file2: res.file2,
-                similarityScore: res.score
+                score: res.score,
+                regions: res.regions
             }));
 
             if (comparisonDocs.length > 0) {
@@ -87,5 +88,47 @@ export const uploadFiles = async (req: Request, res: Response) => {
     } catch (error) {
         console.error('Upload Error:', error);
         res.status(500).json({ message: 'Server Error during upload' });
+    }
+};
+
+export const getScanStatus = async (req: Request, res: Response) => {
+    try {
+        const { scanId } = req.params;
+        const scanGroup = await ScanGroup.findById(scanId);
+
+        if (!scanGroup) {
+            res.status(404).json({ message: 'Scan not found' });
+            return;
+        }
+
+        res.json({
+            _id: scanGroup._id,
+            status: scanGroup.status,
+            files: scanGroup.files,
+            createdAt: scanGroup.createdAt
+        });
+    } catch (error) {
+        console.error('Get Status Error:', error);
+        res.status(500).json({ message: 'Server Error fetching status' });
+    }
+};
+
+export const getScanResults = async (req: Request, res: Response) => {
+    try {
+        const { scanId } = req.params;
+
+        if (!scanId) {
+            res.status(400).json({ message: 'Scan ID is required' });
+            return;
+        }
+
+        const results = await ComparisonResult.find({ scanGroupId: scanId });
+
+        // If scan is completed but no results found, return empty array
+        // (This happens if < 2 files or some error)
+        res.json(results);
+    } catch (error) {
+        console.error('Get Results Error:', error);
+        res.status(500).json({ message: 'Server Error fetching results' });
     }
 };

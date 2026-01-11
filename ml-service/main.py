@@ -53,11 +53,63 @@ def compare_documents(request: CompareRequest):
     score = checker.compare_documents(vec_a, vec_b)
     
     # regions
-    # Using thresholds from original utils (0.6, 0.5)
     processed_regions_dicts = checker.get_regions_with_text(doc_a, doc_b, high_threshold=0.6, low_threshold=0.5)
     processed_regions = [Region(**r) for r in processed_regions_dicts]
     
     return SimilarityResponse(score=score, regions=processed_regions)
+
+class BatchRequest(BaseModel):
+    documents: List[Document]
+
+class BatchComparisonResult(BaseModel):
+    file1: str
+    file2: str
+    score: float
+    regions: List[Region]
+
+class BatchResponse(BaseModel):
+    results: List[BatchComparisonResult]
+
+@app.post("/batch-compare", response_model=BatchResponse)
+def batch_compare_documents(request: BatchRequest):
+    if not checker:
+        raise HTTPException(status_code=503, detail="Model not initialized")
+    
+    docs = request.documents
+    results = []
+    
+    # Dict[filename, embedding_vector]
+    embeddings = {}
+    for doc in docs:
+        embeddings[doc.filename] = checker.get_document_embedding(doc.content)
+    
+    n = len(docs)
+    for i in range(n):
+        for j in range(i + 1, n):
+            doc_a = docs[i]
+            doc_b = docs[j]
+            
+            vec_a = embeddings[doc_a.filename]
+            vec_b = embeddings[doc_b.filename]
+            
+            score = checker.compare_documents(vec_a, vec_b)
+            
+            regions_dicts = checker.get_regions_with_text(
+                doc_a.content, 
+                doc_b.content, 
+                0.6, 
+                0.5 
+            )
+            regions = [Region(**r) for r in regions_dicts]
+            
+            results.append(BatchComparisonResult(
+                file1=doc_a.filename,
+                file2=doc_b.filename,
+                score=score,
+                regions=regions
+            ))
+            
+    return BatchResponse(results=results)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
