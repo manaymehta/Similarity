@@ -7,7 +7,6 @@ import chromadb
 
 from src.utils import create_checker
 
-# Define Data Models
 class Document(BaseModel):
     filename: str
     content: str
@@ -33,7 +32,6 @@ class SimilarityResponse(BaseModel):
     score: float
     regions: List[Region]
 
-# Load model on startup
 print("Loading model...")
 checker = create_checker('plagiarism_detector_model.pth')
 print("Model loaded.")
@@ -63,8 +61,7 @@ def compare_documents(request: CompareRequest):
     
     return SimilarityResponse(score=score, regions=processed_regions)
 
-# --- Encoding for Hybrid Storage ---
-
+# Encoding for storage in ChromaDB
 class EncodeRequest(BaseModel):
     document: Document
 
@@ -87,7 +84,7 @@ def encode_document_chunks(request: EncodeRequest):
     
     chunks_meta = checker.chunk_text(doc_content)
     
-    # Re-using get_document_embedding logic but getting per-chunk vectors
+    # reusing get_document_embedding logic but getting per chunk vectors
     
     response_chunks = []
     
@@ -107,7 +104,7 @@ def encode_document_chunks(request: EncodeRequest):
             vector = checker.model(input_ids, mask)
             vector = torch.nn.functional.normalize(vector, p=2, dim=1)
             
-            # Convert to list for JSON serialization
+            # convert to list for json 
             vec_list = vector.cpu().numpy()[0].tolist()
             
             response_chunks.append(ChunkData(
@@ -177,7 +174,7 @@ def batch_compare_documents(request: BatchRequest):
 
 # ChromaDB Client
 try:
-    chroma_client = chromadb.HttpClient(host="localhost", port=8000)
+    chroma_client = chromadb.HttpClient(host="127.0.0.1", port=8000)
     chroma_collection = chroma_client.get_or_create_collection(name="similarity_chunks")
     print("Connected to ChromaDB")
 except Exception as e:
@@ -199,7 +196,7 @@ def compare_group(request: CompareGroupRequest):
     if not hashes:
         return BatchResponse(results=[])
 
-    # Fetch chunks from Chroma
+    # fetching chunks from Chroma
     try:
         results = chroma_collection.get(
             where={"file_hash": {"$in": hashes}},
@@ -212,8 +209,8 @@ def compare_group(request: CompareGroupRequest):
     if not results['ids']:
         return BatchResponse(results=[])
 
-    # Reconstruct per-file data -> file_data[hash] = { 'vectors': Tensor, 'chunks_meta': List[dict] }
-    file_data = {}
+    # reconstruct every files data -> file_data[hash] = { 'vectors': Tensor, 'chunks_meta': List[dict] }
+    temp_storage = {}
     
     for i, _id in enumerate(results['ids']):
         meta = results['metadatas'][i]
@@ -230,6 +227,7 @@ def compare_group(request: CompareGroupRequest):
         })
 
     # Sort and stack
+    file_data = {}
     for h, items in temp_storage.items():
         items.sort(key=lambda x: x['index'])
         
@@ -241,7 +239,7 @@ def compare_group(request: CompareGroupRequest):
             'chunks_meta': chunks_meta
         }
 
-    # Compare All-vs-All
+    # compare all vs all
     comparison_results = []
     unique_hashes = list(file_data.keys())
     n = len(unique_hashes)
@@ -254,10 +252,10 @@ def compare_group(request: CompareGroupRequest):
             data1 = file_data[h1]
             data2 = file_data[h2]
             
-            # Global Score (using vectors)
+            # global score using vectors
             score = checker.compare_documents(data1['vectors'], data2['vectors'])
             
-            # Regions (using metadata + vectors)
+            # regions using metadata + vectors
             regions = checker.get_regions_with_chunks(
                 data1['chunks_meta'],
                 data2['chunks_meta'],

@@ -90,4 +90,29 @@ export const getFileContent = async (groupId: string, filename: string): Promise
     return response.data.content;
 };
 
+
+/**
+ * Delete a group.
+ */
+export const deleteGroup = async (groupId: string): Promise<void> => {
+    await apiClient.delete(`/groups/${groupId}`);
+};
+
+/**
+ * Add files to an existing group.
+ */
+export const addFilesToGroup = async (groupId: string, files: File[]): Promise<Group> => {
+    const formData = new FormData();
+    files.forEach(file => {
+        formData.append('files', file);
+    });
+
+    const response = await apiClient.post<Group>(`/groups/${groupId}/files`, formData, {
+        headers: {
+            'Content-Type': 'multipart/form-data',
+        },
+    });
+    return response.data;
+};
+
 export default apiClient;

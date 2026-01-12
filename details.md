@@ -50,34 +50,34 @@ Identifies "Plagiarism Islands" in a sea of text.
 **Role**: API Gateway & Task Orchestrator. Managed by Node.js/Express.
 
 ### A. Data Flow (Upload -> Result)
-1.  **Ingestion (`scanRoutes.ts`)**:
-    *   Endpoint: `POST /api/scan/upload`
+1.  **Ingestion (`groupsRoutes.ts`)**:
+    *   Endpoint: `POST /api/groups`
     *   Middleware: `multer` (MemoryStorage). Files are held in RAM buffer.
-2.  **State Management (`ScanGroup` Model)**:
-    *   A `ScanGroup` document is created in MongoDB immediately upon upload.
+2.  **State Management (`Group` Model)**:
+    *   A `Group` document is created in MongoDB immediately upon upload.
     *   Status: `pending` -> `processing` -> `completed`.
-3.  **Processing (`scanController.ts`)**:
-    *   **Async Execution**: The API returns `201 Created` immediately with a `scanId`. The processing runs in the background.
-    *   **Rationale**: ML inference on 50 files can take minutes. A standard HTTP request would timeout. The "Pending/Completed" status pattern allows the Frontend to poll for results without blocking.
+3.  **Processing (`groupsController.ts`)**:
+    *   **Async Execution**: The API processes files (hashing, checking cache, encoding via ML service) and creates the group.
+    *   **Rationale**: ML encoding is resource intensive. Calculated chunks are cached in ChromaDB to speed up future requests.
 
-### B. Integration (`mlService.ts`)
+### B. Integration (`groupsController.ts` -> ML Service)
 *   **Protocol**: HTTP (axios).
-*   **Target**: `http://localhost:8000/batch-compare`.
-*   **Payload**: `{ documents: [{filename: "...", content: "..."}] }`.
+*   **Target**: `http://127.0.0.1:5001/encode` (Per file) and `/compare-group` (Per group).
+*   **Payload**: `{ documents: ... }` or `{ hashes: ... }`.
 *   **Response Handling**:
-    *   Receives list of `BatchComparisonResult` objects (containing `Region[]`).
-    *   Writes each result to the `ComparisonResult` MongoDB collection.
+    *   /encode: Receives chunks + vectors. Returns `ComparisonResult[]`. 
+    *   /compare-group: Receives list of `ComparisonResult` objects (containing `Region[]`). Returns `ComparisonResult[]`. 
 
 ### C. Database Schema (MongoDB)
-*   **ScanGroup**: `{ _id, status, files: [{filename, content}], createdAt }`
-*   **ComparisonResult**: `{ scanGroupId, file1, file2, score, regions: [...] }`
-    *   *Note*: Normalized schema. Results are linked to the Group ID.
+*   **Group**: `{ _id, name, files: [{hash, filename}], status, createdAt }`
+*   **Document**: `{ hash, filename, fullText, chunkCount }` (Source of Truth for Text)
+*   **ComparisonResult**: (Legacy/Optional) Used for caching results, but `/compare-group` often computes on-fly.
 
 ---
 ## 3. Frontend Client (`client/`)
 **Role**: User Interface (Dashboard).
 *   **Framework**: React 18 + Vite.
-*   **Integration**: Polls `GET /api/scan/:id/status` to check progress.
+*   **Integration**: Polls `GET /api/groups` to list, and `/api/groups/:id/results` for report.
 *   **Visualization**: Renders the N x N similarity matrix as a heatmap.
 
 
@@ -89,19 +89,20 @@ Similarity/
 ├── client/                  # [Frontend] React + Vite
 ├── server/                  # [Backend] Node.js API
 │   ├── src/
-│   │   ├── controllers/     # Business Logic (scanController)
-│   │   ├── services/        # External Calls (mlService -> Python)
-│   │   └── routes/          # API Endpoints
+│   │   ├── controllers/     # Business Logic (groupsController)
+│   │   ├── models/          # Mongoose Models (Group, Document)
+│   │   ├── utils/           # ChromaClient, Hash
+│   │   └── routes/          # API Endpoints (groupsRoutes)
 ├── ml-service/              # [ML Engine] Python
-│   ├── cli_main.py          # CLI Entry Point (Train/Explore/Search)
-│   ├── main.py              # HTTP Server Entry Point (FastAPI/Flask)
-│   ├── embeddings.pth       # [Artifact] Persisted Vector DB
+│   ├── main.py              # HTTP Server Entry Point (FastAPI)
 │   ├── data/                # Local Test Data
+│   ├── requirements.txt     # Python Dependencies
 │   └── src/                 # ML Source Code
 │       ├── model.py         # SiameseNetwork Class
 │       ├── inference.py     # PlagiarismChecker & Region Logic
-│       ├── utils.py         # Load/Save Embeddings, Print Helpers
-│       └── visualize.py     # Heatmap Plotting
+│       ├── train.py         # Training Script
+│       ├── utils.py         # Print Helpers
+├── chroma_db/               # [Vector DB] Local Storage
 └── README.md                # Project Overview
 ```
 
@@ -112,3 +113,41 @@ Similarity/
     *   Low (Expand): 0.50
 *   **Max Text Length**: Unlimited (via Sliding Window)
 *   **Upload Limit**: 5MB per file (Server constraint).
+
+---
+
+## 6. Recent Updates (Phase 6 & 7): Hybrid Vector Architecture
+> **Context**: Moved from pure MongoDB storage to a Hybrid approach (MongoDB + ChromaDB) to enable incremental file addition and centralized ML logic.
+
+### A. New Components
+1.  **ChromaDB (Vector Store)**:
+    *   **Port**: `8000` (Host: `127.0.0.1`).
+    *   **Role**: Stores document *chunk embeddings* permanently.
+    *   **Schema**:
+        *   `ids`: `${file_hash}_${chunk_index}`
+        *   `embeddings`: 384-d float vectors.
+        *   `metadatas`: `{ file_hash, chunk_index, text_snippet, start_char, end_char }`
+
+2.  **Updated ML Service (`ml-service/main.py`)**:
+    *   **`POST /encode`**: Accepts a single document, chunks it, computes vectors, and returns them (for Node.js to save to Chroma).
+    *   **`POST /compare-group`**: Accepts a list of file hashes.
+        *   Fetches vectors directly from ChromaDB (using `file_hash`).
+        *   Performs all-vs-all comparison using **Reference Counting** logic (optimized matrix operations).
+        *   Returns detailed `ComparisonResult` with regions.
+
+3.  **Updated Backend (`server/groupsController.ts`)**:
+    *   **De-duplication**: Checks MongoDB for existing `file_hash`. If found, skips re-encoding (Instant upload).
+    *   **Group Deletion**: Implements **Reference Counting Cleanup**.
+        *   When a group is deleted, checks if its files are used by *any other* group.
+        *   If `usageCount == 0`, deletes the file's metadata (MongoDB) and Vectors (ChromaDB) to prevent orphans.
+
+### B. New Data Flow (Add Files to Group)
+1.  User adds files to existing Group.
+2.  Backend calculates Hash.
+3.  **Cache Hit**: If hash exists in Mongo -> Link to Group.
+4.  **Cache Miss**:
+    *   Send to ML Service (`/encode`).
+    *   Save Chunks to ChromaDB.
+    *   Save Metadata to MongoDB.
+    *   Link to Group.
+5.  Call ML Service (`/compare-group`) with *new* list of hashes to get updated report.

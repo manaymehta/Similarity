@@ -14,9 +14,6 @@ const groupSchema = new mongoose.Schema({
             type: String,
             required: true
         },
-        // We might validly duplicate content here slightly or just fetch from Document?
-        // For efficiency in displaying lists, let's just keep filename/hash here.
-        // Full content is in the 'Document' collection.
     }],
     status: {
         type: String,

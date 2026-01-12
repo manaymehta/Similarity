@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGroupDetails, getGroupResults, getFileContent, type ComparisonResult, type Group } from '../services/api';
-import { Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft } from 'lucide-react';
+import { getGroupDetails, getGroupResults, getFileContent, addFilesToGroup, type ComparisonResult, type Group } from '../services/api';
+import { Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft, Plus } from 'lucide-react';
 import { Heatmap } from '../components/visualization/Heatmap';
 import { SideBySideViewer } from '../components/visualization/SideBySideViewer';
 
@@ -11,7 +11,7 @@ export const Report: React.FC = () => {
 
     const [group, setGroup] = useState<Group | null>(null);
     const [statusLoading, setStatusLoading] = useState(true);
-    const [statusError, setStatusError] = useState<string | null>(null); // Keeping string for error message
+    const [statusError, setStatusError] = useState<string | null>(null);
 
     const [results, setResults] = useState<ComparisonResult[]>([]);
     const [resultsLoading, setResultsLoading] = useState(false);
@@ -20,33 +20,50 @@ export const Report: React.FC = () => {
     const [fileContent1, setFileContent1] = useState<string>("");
     const [fileContent2, setFileContent2] = useState<string>("");
     const [contentLoading, setContentLoading] = useState(false);
+    const [addingFiles, setAddingFiles] = useState(false);
+
+    const loadData = async () => {
+        if (!scanId) return;
+        try {
+            const groupData = await getGroupDetails(scanId);
+            setGroup(groupData);
+
+            if (groupData._id) {
+                setResultsLoading(true);
+                const resultsData = await getGroupResults(scanId);
+                setResults(resultsData);
+            }
+        } catch (err: any) {
+            console.error("Failed to load report", err);
+            setStatusError("Failed to load group details.");
+        } finally {
+            setStatusLoading(false);
+            setResultsLoading(false);
+        }
+    };
 
     useEffect(() => {
-        if (!scanId) return;
-
-        const fetchData = async () => {
-            try {
-                // 1. Fetch Group Details
-                const groupData = await getGroupDetails(scanId);
-                setGroup(groupData);
-
-                // 2. Fetch Results (assuming completed, since flow is sync)
-                if (groupData._id) {
-                    setResultsLoading(true);
-                    const resultsData = await getGroupResults(scanId);
-                    setResults(resultsData);
-                }
-            } catch (err: any) {
-                console.error("Failed to load report", err);
-                setStatusError("Failed to load group details.");
-            } finally {
-                setStatusLoading(false);
-                setResultsLoading(false);
-            }
-        };
-
-        fetchData();
+        loadData();
     }, [scanId]);
+
+    const handleAddFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!event.target.files?.length || !scanId) return;
+
+        setAddingFiles(true);
+        const filesArray = Array.from(event.target.files);
+
+        try {
+            await addFilesToGroup(scanId, filesArray);
+            await loadData(); // Reload everything
+        } catch (error) {
+            console.error('Failed to add files', error);
+            alert('Failed to add files');
+        } finally {
+            setAddingFiles(false);
+            // innovative way to clear input
+            event.target.value = '';
+        }
+    };
 
     const handleComparisionSelect = async (comparison: ComparisonResult) => {
         setContentLoading(true);
@@ -60,7 +77,6 @@ export const Report: React.FC = () => {
             setSelectedComparison(comparison);
         } catch (error) {
             console.error("Failed to load file contents", error);
-            // Optionally show toast error
         } finally {
             setContentLoading(false);
         }
@@ -106,15 +122,36 @@ export const Report: React.FC = () => {
                     >
                         <ArrowLeft className="w-4 h-4" /> Back to Upload
                     </button>
-                    <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                        {group.name}
-                        <span className="text-sm font-normal px-3 py-1 bg-green-500/10 text-green-400 rounded-full border border-green-500/20 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> {group.status}
-                        </span>
-                    </h1>
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                            {group.name}
+                            <span className="text-sm font-normal px-3 py-1 bg-green-500/10 text-green-400 rounded-full border border-green-500/20 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" /> {group.status}
+                            </span>
+                        </h1>
+                    </div>
                     <p className="text-slate-400 mt-1">
                         Group ID: <span className="font-mono text-slate-500">{scanId}</span>
                     </p>
+                </div>
+
+                <div className="flex gap-2">
+                    <label className={`cursor-pointer flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-all ${addingFiles ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        {addingFiles ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <Plus className="w-4 h-4" />
+                        )}
+                        <span>{addingFiles ? 'Adding...' : 'Add Files'}</span>
+                        <input
+                            type="file"
+                            multiple
+                            onChange={handleAddFiles}
+                            disabled={addingFiles}
+                            className="hidden"
+                            accept=".txt,.md,.pdf,.docx"
+                        />
+                    </label>
                 </div>
             </div>
 

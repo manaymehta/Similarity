@@ -1,19 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getGroups, type Group } from '../services/api';
-import { Loader2, ArrowLeft, Calendar, FileText, CheckCircle2 } from 'lucide-react';
+import { getGroups, deleteGroup, type Group } from '../services/api';
+import { Loader2, ArrowLeft, Calendar, FileText, CheckCircle2, Trash2 } from 'lucide-react';
 
 export const GroupList: React.FC = () => {
     const navigate = useNavigate();
     const [groups, setGroups] = useState<Group[]>([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
+    const loadGroups = () => {
+        setLoading(true);
         getGroups()
             .then(setGroups)
             .catch(console.error)
             .finally(() => setLoading(false));
+    };
+
+    useEffect(() => {
+        loadGroups();
     }, []);
+
+    const handleDelete = async (e: React.MouseEvent, groupId: string) => {
+        e.stopPropagation();
+        if (!window.confirm('Are you sure you want to delete this group?')) return;
+
+        try {
+            await deleteGroup(groupId);
+            loadGroups(); // Refresh list
+        } catch (error) {
+            console.error('Failed to delete group:', error);
+            alert('Failed to delete group');
+        }
+    };
 
     if (loading) {
         return (
@@ -68,6 +86,13 @@ export const GroupList: React.FC = () => {
                                     <CheckCircle2 className="w-3 h-3" />
                                     {group.status}
                                 </span>
+                                <button
+                                    onClick={(e) => handleDelete(e, group._id)}
+                                    className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                    title="Delete Group"
+                                >
+                                    <Trash2 className="w-5 h-5" />
+                                </button>
                             </div>
                         </div>
                     ))

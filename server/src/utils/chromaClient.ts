@@ -1,7 +1,13 @@
 import { ChromaClient, type Collection, type EmbeddingFunction } from 'chromadb';
 
 const client = new ChromaClient({
-    path: "http://localhost:8000"
+    path: "http://127.0.0.1:8000" // path is still supported but might warn. If strict:
+    // host: "http://127.0.0.1", 
+    // port: 8000 
+    // But sticking to path for now as it works, the warning is benign. 
+    // Actually, let's just silence it or ignore. 
+    // Wait, I see the warning "The 'path' argument is deprecated".
+    // Let's try the modern way.
 });
 
 // Custom Embedding Function that does nothing (since we provide embeddings manually)

@@ -40,3 +40,7 @@ Thumbs.db
 logs/
 coverage/
 *.log
+
+chromadb/
+chroma_db/
+chroma_data/

@@ -1,23 +1,29 @@
 import express from 'express';
 import multer from 'multer';
-import { createGroup, getGroups, getGroupDetails, getGroupResults, getFileContent } from '../controllers/groupsController.js';
+import { createGroup, getGroups, getGroupDetails, getGroupResults, getFileContent, deleteGroup, addFilesToGroup } from '../controllers/groupsController.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// POST /api/groups - Create a new group with files
+// create a new group with files
 router.post('/', upload.array('files'), createGroup);
 
-// GET /api/groups - List all groups
+// list all groups
 router.get('/', getGroups);
 
-// GET /api/groups/:id - Get specific group details
+// get specific group details
 router.get('/:id', getGroupDetails);
 
-// GET /api/groups/:id/files/content - Get content of a specific file
+// get content of a specific file
 router.get('/:id/files/content', getFileContent);
 
-// GET /api/groups/:id/results - Get comparison results for the group
+// get comparison results for the group
 router.get('/:id/results', getGroupResults);
+
+// delete group
+router.delete('/:id', deleteGroup);
+
+// add files to group
+router.post('/:id/files', upload.array('files'), addFilesToGroup);
 
 export default router;
