@@ -32,7 +32,8 @@ export interface ComparisonResult {
 
 // --- API Client ---
 const apiClient = axios.create({
-    baseURL: '/api', // Vite proxy will handle this
+    // Direct link to the backend container (exposed on host port 5000)
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
     headers: {
         'Content-Type': 'application/json',
     },

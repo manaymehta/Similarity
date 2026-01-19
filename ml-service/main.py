@@ -4,6 +4,10 @@ from typing import List, Optional
 import torch
 import uvicorn
 import chromadb
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.utils import create_checker
 
@@ -174,7 +178,9 @@ def batch_compare_documents(request: BatchRequest):
 
 # ChromaDB Client
 try:
-    chroma_client = chromadb.HttpClient(host="127.0.0.1", port=8000)
+    chroma_host = os.environ.get('CHROMA_HOST', '127.0.0.1')
+    chroma_port = int(os.environ.get('CHROMA_PORT', '8000'))
+    chroma_client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
     chroma_collection = chroma_client.get_or_create_collection(name="similarity_chunks")
     print("Connected to ChromaDB")
 except Exception as e:

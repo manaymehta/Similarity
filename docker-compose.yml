@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # 1. Frontend (Client)
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80" # Maps localhost:3000 to container:80 (Nginx)
+    depends_on:
+      - server
+    networks:
+      - app-network
+
+  # 2. Backend (Server)
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=${MONGO_URI} # Use value from the .env file on host machine 
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - ML_SERVICE_URL=http://ml-service:5001
+    depends_on:
+      - chromadb
+      - ml-service
+    networks:
+      - app-network
+
+  # 3. ML Service (Python)
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    depends_on:
+      - chromadb
+    networks:
+      - app-network
+
+  # 4. Database (MongoDB) 
+  # Using MongoDB Cloud instead of local container.
+
+  # 5. ChromaDB
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/.chroma/index
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  chroma_data: # mongo_data: Removed unused volume

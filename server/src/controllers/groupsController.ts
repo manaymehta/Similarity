@@ -40,7 +40,9 @@ export const createGroup = async (req: Request, res: Response) => {
             if (!existingDoc) {
                 try {
                     // Call ML Service
-                    const mlRes = await axios.post<MLEncodeResponse>('http://127.0.0.1:5001/encode', {
+                    // DOCKER FIX: Use service name, not localhost
+                    const mlUrl = process.env.ML_SERVICE_URL || 'http://ml-service:5001';
+                    const mlRes = await axios.post<MLEncodeResponse>(`${mlUrl}/encode`, {
                         document: {
                             filename: file.originalname,
                             content: content
@@ -319,7 +321,8 @@ export const getGroupResults = async (req: Request, res: Response) => {
         // calling ml-service for comparison
         try {
             console.log(`Sending ${uniqueHashes.length} file hashes to ml-service for group comparison ${id}...`);
-            const mlResponse = await axios.post('http://127.0.0.1:5001/compare-group', {
+            const mlUrl = process.env.ML_SERVICE_URL || 'http://ml-service:5001';
+            const mlResponse = await axios.post(`${mlUrl}/compare-group`, {
                 hashes: uniqueHashes,
                 filenames: filenames
             });

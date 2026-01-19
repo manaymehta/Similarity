@@ -6,3 +6,4 @@ transformers
 tokenizers
 sentence-transformers
 chromadb
+python-dotenv
