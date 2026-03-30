@@ -17,14 +17,16 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements file
 COPY requirements.txt .
 
-# Install Python dependencies
-# --no-cache-dir helps keep the image smaller
+# Install CPU-specific PyTorch explicitly FIRST (Industry standard for Docker)
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY . .
 
-# Expose the application port
+# Expose the application port at 5001
 EXPOSE 5001
 
 # Start the application

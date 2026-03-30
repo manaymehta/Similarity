@@ -1,27 +1,20 @@
-# Use a lightweight Node.js image
-FROM node:18-alpine
-
-# Set working directory
+# Stage 1: Build
+FROM node:18-alpine AS builder
 WORKDIR /app
-
-# Copy package files first to leverage Docker cache
 COPY package*.json ./
-
-# Install dependencies
 RUN npm install
-
-# Copy source code
 COPY . .
-
-# Build the TypeScript code
 RUN npm run build
 
-# Expose the application port
-EXPOSE 5000
+# Stage 2: Production
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+# Only install production dependencies
+RUN npm install --omit=dev
+# Copy only the compiled code from the builder stage
+COPY --from=builder /app/dist ./dist
 
-# Start the server
-CMD ["npm", "run", "dev"]
-# Note: In a real production setup, you might want to run 'node dist/index.js' 
-# but 'npm run dev' (nodemon) is fine for this learning phase/dev container.
-# If you want strict production: 
-# CMD ["node", "dist/index.js"]
+EXPOSE 5000
+# Run the compiled JavaScript directly with node
+CMD ["node", "dist/index.js"]

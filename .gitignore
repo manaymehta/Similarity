@@ -44,3 +44,5 @@ coverage/
 chromadb/
 chroma_db/
 chroma_data/
+
+Similarity.code-workspace

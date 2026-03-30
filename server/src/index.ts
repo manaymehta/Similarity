@@ -1,27 +1,10 @@
-import express, { type Request, type Response } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
-import groupsRoutes from './routes/groupsRoutes.js';
-
+import app from './app.js';
 
 dotenv.config();
 
-const app = express();
 const PORT = process.env.PORT || 5000;
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-
-// Routes
-app.use('/api/groups', groupsRoutes);
-
-
-app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok', message: 'Server is running' });
-});
 
 // Start server
 const startServer = async () => {
@@ -37,3 +20,8 @@ const startServer = async () => {
 };
 
 startServer();
+
+// app is seperated from index.ts to make it easier to test.
+// This allows testing libraries like supertest to simulate HTTP requests against the
+// app instance directly in memory, without the overhead of opening a network socket.
+// in simple words, we can test the app without starting the server.
