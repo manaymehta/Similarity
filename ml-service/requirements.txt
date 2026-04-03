@@ -1,8 +1,10 @@
 fastapi
 uvicorn
 pydantic
-transformers
 tokenizers
-sentence-transformers
-chromadb
 python-dotenv
+onnxruntime
+numpy
+huggingface-hub
+chromadb-client
+transformers

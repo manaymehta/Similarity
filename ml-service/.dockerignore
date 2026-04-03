@@ -1,0 +1,31 @@
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment files
+.env
+venv/
+env/
+.venv/
+
+# Development Scripts & Prototyping
+extra/
+scripts/
+src/train.py
+src/dataset.py
+src/visualize.py
+export_onnx.py
+
+# Weights and Models (except ONNX)
+*.pth
+plagiarism_detector_model.pth
+embeddings.pth
+saved_models/
+data/
+
+# Docker/OS artifacts
+.DS_Store
+Dockerfile
+requirements-dev.txt

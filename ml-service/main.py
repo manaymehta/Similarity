@@ -1,11 +1,19 @@
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-import torch
 import uvicorn
 import chromadb
-import os
+
 from dotenv import load_dotenv
+
+try:
+    import torch
+    import torch.nn.functional as F
+    USE_TORCH = True
+except ImportError:
+    import numpy as np
+    USE_TORCH = False
 
 load_dotenv()
 
@@ -44,7 +52,7 @@ app = FastAPI()
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "model_loaded": checker is not None}
+    return {"status": "ok", "model_loaded": checker is not None, "engine": "PyTorch" if USE_TORCH else "ONNX/Numpy"}
 
 @app.post("/compare", response_model=SimilarityResponse)
 def compare_documents(request: CompareRequest):
@@ -54,18 +62,15 @@ def compare_documents(request: CompareRequest):
     doc_a = request.doc_a.content
     doc_b = request.doc_b.content
     
-    # similarity score
     vec_a = checker.get_document_embedding(doc_a)
     vec_b = checker.get_document_embedding(doc_b)
     score = checker.compare_documents(vec_a, vec_b)
     
-    # regions
     processed_regions_dicts = checker.get_regions_with_text(doc_a, doc_b, high_threshold=0.6, low_threshold=0.5)
     processed_regions = [Region(**r) for r in processed_regions_dicts]
     
     return SimilarityResponse(score=score, regions=processed_regions)
 
-# Encoding for storage in ChromaDB
 class EncodeRequest(BaseModel):
     document: Document
 
@@ -85,39 +90,36 @@ def encode_document_chunks(request: EncodeRequest):
         raise HTTPException(status_code=503, detail="Model not initialized")
     
     doc_content = request.document.content
-    
     chunks_meta = checker.chunk_text(doc_content)
-    
-    # reusing get_document_embedding logic but getting per chunk vectors
-    
     response_chunks = []
     
-    with torch.no_grad():
+    if USE_TORCH:
+        with torch.no_grad():
+            for i, meta in enumerate(chunks_meta):
+                chunk_str = meta['text']
+                inputs = checker.tokenizer(chunk_str, padding='max_length', truncation=True, max_length=128, return_tensors="pt")
+                input_ids = inputs['input_ids'].to(checker.device)
+                mask = inputs['attention_mask'].to(checker.device)
+
+                vector = checker.model(input_ids, mask)
+                vector = F.normalize(vector, p=2, dim=1)
+                vec_list = vector.cpu().numpy()[0].tolist()
+                
+                response_chunks.append(ChunkData(vector=vec_list, text=meta['text'], chunk_index=i, start_char=meta['start_char'], end_char=meta['end_char']))
+    else:
         for i, meta in enumerate(chunks_meta):
             chunk_str = meta['text']
-            inputs = checker.tokenizer(
-                chunk_str, 
-                padding='max_length', 
-                truncation=True, 
-                max_length=128, 
-                return_tensors="pt"
-            )
-            input_ids = inputs['input_ids'].to(checker.device)
-            mask = inputs['attention_mask'].to(checker.device)
-
+            inputs = checker.tokenizer(chunk_str, padding='max_length', truncation=True, max_length=128, return_tensors=None)
+            input_ids = np.array([inputs['input_ids']], dtype=np.int64)
+            mask = np.array([inputs['attention_mask']], dtype=np.int64)
+            
             vector = checker.model(input_ids, mask)
-            vector = torch.nn.functional.normalize(vector, p=2, dim=1)
-            
-            # convert to list for json 
-            vec_list = vector.cpu().numpy()[0].tolist()
-            
-            response_chunks.append(ChunkData(
-                vector=vec_list,
-                text=meta['text'],
-                chunk_index=i,
-                start_char=meta['start_char'],
-                end_char=meta['end_char']
-            ))
+            norm = np.linalg.norm(vector, ord=2, axis=1, keepdims=True)
+            norm = np.where(norm == 0, 1e-12, norm)
+            vector = vector / norm
+            vec_list = vector[0].tolist()
+
+            response_chunks.append(ChunkData(vector=vec_list, text=meta['text'], chunk_index=i, start_char=meta['start_char'], end_char=meta['end_char']))
             
     return EncodeResponse(chunks=response_chunks)
 
@@ -141,7 +143,6 @@ def batch_compare_documents(request: BatchRequest):
     docs = request.documents
     results = []
     
-    # Dict[filename, embedding_vector]
     embeddings = {}
     for doc in docs:
         embeddings[doc.filename] = checker.get_document_embedding(doc.content)
@@ -151,32 +152,17 @@ def batch_compare_documents(request: BatchRequest):
         for j in range(i + 1, n):
             doc_a = docs[i]
             doc_b = docs[j]
-            
             vec_a = embeddings[doc_a.filename]
             vec_b = embeddings[doc_b.filename]
             
             score = checker.compare_documents(vec_a, vec_b)
-            
-            regions_dicts = checker.get_regions_with_text(
-                doc_a.content, 
-                doc_b.content, 
-                0.6, 
-                0.5 
-            )
+            regions_dicts = checker.get_regions_with_text(doc_a.content, doc_b.content, 0.6, 0.5)
             regions = [Region(**r) for r in regions_dicts]
             
-            results.append(BatchComparisonResult(
-                file1=doc_a.filename,
-                file2=doc_b.filename,
-                score=score,
-                regions=regions
-            ))
+            results.append(BatchComparisonResult(file1=doc_a.filename, file2=doc_b.filename, score=score, regions=regions))
             
     return BatchResponse(results=results)
 
-
-
-# ChromaDB Client
 try:
     chroma_host = os.environ.get('CHROMA_HOST', '127.0.0.1')
     chroma_port = int(os.environ.get('CHROMA_PORT', '8000'))
@@ -189,7 +175,7 @@ except Exception as e:
 
 class CompareGroupRequest(BaseModel):
     hashes: List[str]
-    filenames: dict # map hash -> filename
+    filenames: dict
 
 @app.post("/compare-group", response_model=BatchResponse)
 def compare_group(request: CompareGroupRequest):
@@ -202,12 +188,8 @@ def compare_group(request: CompareGroupRequest):
     if not hashes:
         return BatchResponse(results=[])
 
-    # fetching chunks from Chroma
     try:
-        results = chroma_collection.get(
-            where={"file_hash": {"$in": hashes}},
-            include=["embeddings", "metadatas"]
-        )
+        results = chroma_collection.get(where={"file_hash": {"$in": hashes}}, include=["embeddings", "metadatas"])
     except Exception as e:
         print(f"Chroma Query Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -215,9 +197,7 @@ def compare_group(request: CompareGroupRequest):
     if not results['ids']:
         return BatchResponse(results=[])
 
-    # reconstruct every files data -> file_data[hash] = { 'vectors': Tensor, 'chunks_meta': List[dict] }
     temp_storage = {}
-    
     for i, _id in enumerate(results['ids']):
         meta = results['metadatas'][i]
         vector = results['embeddings'][i]
@@ -226,26 +206,19 @@ def compare_group(request: CompareGroupRequest):
         if h not in temp_storage:
             temp_storage[h] = []
         
-        temp_storage[h].append({
-            'index': meta['chunk_index'],
-            'vector': vector,
-            'meta': meta
-        })
+        temp_storage[h].append({'index': meta['chunk_index'], 'vector': vector, 'meta': meta})
 
-    # Sort and stack
     file_data = {}
     for h, items in temp_storage.items():
         items.sort(key=lambda x: x['index'])
-        
-        vectors = torch.tensor([x['vector'] for x in items])
-        chunks_meta = [x['meta'] for x in items]
-        
-        file_data[h] = {
-            'vectors': vectors,
-            'chunks_meta': chunks_meta
-        }
+        if USE_TORCH:
+            vectors = torch.tensor([x['vector'] for x in items])
+        else:
+            vectors = np.array([x['vector'] for x in items], dtype=np.float32)
 
-    # compare all vs all
+        chunks_meta = [x['meta'] for x in items]
+        file_data[h] = {'vectors': vectors, 'chunks_meta': chunks_meta}
+
     comparison_results = []
     unique_hashes = list(file_data.keys())
     n = len(unique_hashes)
@@ -254,32 +227,24 @@ def compare_group(request: CompareGroupRequest):
         for j in range(i + 1, n):
             h1 = unique_hashes[i]
             h2 = unique_hashes[j]
-            
             data1 = file_data[h1]
             data2 = file_data[h2]
             
-            # global score using vectors
             score = checker.compare_documents(data1['vectors'], data2['vectors'])
             
-            # regions using metadata + vectors
             regions = checker.get_regions_with_chunks(
-                data1['chunks_meta'],
-                data2['chunks_meta'],
-                data1['vectors'],
-                data2['vectors'],
-                high_threshold=0.6,
-                low_threshold=0.5
+                data1['chunks_meta'], data2['chunks_meta'],
+                data1['vectors'], data2['vectors'], 0.6, 0.5
             )
             
             comparison_results.append(BatchComparisonResult(
                 file1=request.filenames.get(h1, "Unknown"),
                 file2=request.filenames.get(h2, "Unknown"),
                 score=score,
-                regions=[Region(**r) for r in regions] # Convert dicts to Region objects
+                regions=[Region(**r) for r in regions]
             ))
 
     return BatchResponse(results=comparison_results)
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5001)
