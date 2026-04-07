@@ -25,9 +25,11 @@ services:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - ML_SERVICE_URL=http://ml-service:5001
+      - REDIS_URL=redis://redis:6379
     depends_on:
       - chromadb
       - ml-service
+      - redis
     networks:
       - app-network
 
@@ -59,9 +61,21 @@ services:
     networks:
       - app-network
 
+  # 6. Redis (Result Cache)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - app-network
+
 networks:
   app-network:
     driver: bridge
 
 volumes:
-  chroma_data: # mongo_data: Removed unused volume
+  chroma_data:
+  redis_data:

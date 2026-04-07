@@ -32,54 +32,6 @@ export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file
         if (activeRef2.current) activeRef2.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, [currentRegionIndex]);
 
-    const HighlightedText = ({ content, regions, activeIndex, isFile1, activeRef }: {
-        content: string,
-        regions: any[],
-        activeIndex: number,
-        isFile1: boolean,
-        activeRef: React.RefObject<HTMLSpanElement | null>
-    }) => {
-        if (!regions || regions.length === 0) {
-            return (
-                <pre className="whitespace-pre-wrap font-sans text-sm text-slate-300 leading-relaxed">
-                    {content}
-                </pre>
-            );
-        }
-
-        // Sort regions by start char to handle sequential rendering (assuming no overlap for simplicity or taken care of)
-        // For the active region, we definitely highlight. 
-        // For context, we might highlight others? For now, let's just highlight the ACTIVELY selected region to avoid clutter.
-
-        const activeRegion = regions[activeIndex];
-        if (!activeRegion) return <pre>{content}</pre>;
-
-        const startChar = isFile1 ? activeRegion.a_start_char : activeRegion.b_start_char;
-        const endChar = isFile1 ? activeRegion.a_end_char : activeRegion.b_end_char;
-
-        // Safety check
-        if (startChar === undefined || endChar === undefined || startChar < 0 || endChar > content.length) {
-            return <pre>{content}</pre>;
-        }
-
-        const pre = content.substring(0, startChar);
-        const match = content.substring(startChar, endChar);
-        const post = content.substring(endChar);
-
-        return (
-            <pre className="whitespace-pre-wrap font-sans text-sm text-slate-300 leading-relaxed">
-                {pre}
-                <span
-                    ref={activeRef}
-                    className="bg-yellow-500/40 text-yellow-100 rounded px-0.5 border-b border-yellow-500"
-                >
-                    {match}
-                </span>
-                {post}
-            </pre>
-        );
-    };
-
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-slate-900 border border-slate-700 w-full max-w-6xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -159,5 +111,49 @@ export const SideBySideViewer: React.FC<SideBySideViewerProps> = ({ result, file
                 </div>
             </div>
         </div>
+    );
+};
+
+const HighlightedText = ({ content, regions, activeIndex, isFile1, activeRef }: {
+    content: string,
+    regions: ComparisonResult['regions'],
+    activeIndex: number,
+    isFile1: boolean,
+    activeRef: React.RefObject<HTMLSpanElement | null>
+}) => {
+    if (!regions || regions.length === 0) {
+        return (
+            <pre className="whitespace-pre-wrap font-sans text-sm text-slate-300 leading-relaxed">
+                {content}
+            </pre>
+        );
+    }
+
+    const activeRegion = regions[activeIndex];
+    if (!activeRegion) return <pre>{content}</pre>;
+
+    const startChar = isFile1 ? activeRegion.a_start_char : activeRegion.b_start_char;
+    const endChar = isFile1 ? activeRegion.a_end_char : activeRegion.b_end_char;
+
+    // Safety check
+    if (startChar === undefined || endChar === undefined || startChar < 0 || endChar > content.length) {
+        return <pre>{content}</pre>;
+    }
+
+    const pre = content.substring(0, startChar);
+    const match = content.substring(startChar, endChar);
+    const post = content.substring(endChar);
+
+    return (
+        <pre className="whitespace-pre-wrap font-sans text-sm text-slate-300 leading-relaxed">
+            {pre}
+            <span
+                ref={activeRef}
+                className="bg-yellow-500/40 text-yellow-100 rounded px-0.5 border-b border-yellow-500"
+            >
+                {match}
+            </span>
+            {post}
+        </pre>
     );
 };

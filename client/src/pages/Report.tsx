@@ -22,7 +22,7 @@ export const Report: React.FC = () => {
     const [contentLoading, setContentLoading] = useState(false);
     const [addingFiles, setAddingFiles] = useState(false);
 
-    const loadData = async () => {
+    const loadData = React.useCallback(async () => {
         if (!scanId) return;
         try {
             const groupData = await getGroupDetails(scanId);
@@ -33,18 +33,18 @@ export const Report: React.FC = () => {
                 const resultsData = await getGroupResults(scanId);
                 setResults(resultsData);
             }
-        } catch (err: any) {
+        } catch (err) {
             console.error("Failed to load report", err);
             setStatusError("Failed to load group details.");
         } finally {
             setStatusLoading(false);
             setResultsLoading(false);
         }
-    };
+    }, [scanId]);
 
     useEffect(() => {
         loadData();
-    }, [scanId]);
+    }, [loadData]);
 
     const handleAddFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
         if (!event.target.files?.length || !scanId) return;
@@ -196,7 +196,14 @@ export const Report: React.FC = () => {
     );
 };
 
-const StatCard = ({ label, value, icon: Icon }: any) => (
+interface StatCardProps {
+    label: string;
+    value: string | number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    icon: React.FC<any>;
+}
+
+const StatCard = ({ label, value, icon: Icon }: StatCardProps) => (
     <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl flex items-center justify-between">
         <div>
             <p className="text-slate-400 text-sm font-medium">{label}</p>

@@ -4,12 +4,12 @@ const chromaHost = process.env.CHROMA_HOST || '127.0.0.1';
 const chromaPort = process.env.CHROMA_PORT || '8000';
 
 const client = new ChromaClient({
-    path: `http://${chromaHost}:${chromaPort}` 
+    path: `http://${chromaHost}:${chromaPort}`
 });
 
-// Custom Embedding Function that does nothing (since we provide embeddings manually)
+// Custom Embedding Function that does nothing since we provide embeddings manually
 class NoOpEmbeddingFunction implements EmbeddingFunction {
-    public async generate(texts: string[]): Promise<number[][]> {
+    public async generate(): Promise<number[][]> {
         throw new Error("NoOpEmbeddingFunction: Embeddings should be provided manually.");
     }
 }

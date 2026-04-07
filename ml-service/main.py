@@ -62,15 +62,18 @@ def compare_documents(request: CompareRequest):
     doc_a = request.doc_a.content
     doc_b = request.doc_b.content
     
+    # similarity score
     vec_a = checker.get_document_embedding(doc_a)
     vec_b = checker.get_document_embedding(doc_b)
     score = checker.compare_documents(vec_a, vec_b)
     
+    # regions
     processed_regions_dicts = checker.get_regions_with_text(doc_a, doc_b, high_threshold=0.6, low_threshold=0.5)
     processed_regions = [Region(**r) for r in processed_regions_dicts]
     
     return SimilarityResponse(score=score, regions=processed_regions)
 
+# Encoding for storage in ChromaDB
 class EncodeRequest(BaseModel):
     document: Document
 
@@ -143,6 +146,7 @@ def batch_compare_documents(request: BatchRequest):
     docs = request.documents
     results = []
     
+    # Dict[filename, embedding_vector]
     embeddings = {}
     for doc in docs:
         embeddings[doc.filename] = checker.get_document_embedding(doc.content)
@@ -163,33 +167,44 @@ def batch_compare_documents(request: BatchRequest):
             
     return BatchResponse(results=results)
 
-try:
-    chroma_host = os.environ.get('CHROMA_HOST', '127.0.0.1')
-    chroma_port = int(os.environ.get('CHROMA_PORT', '8000'))
-    chroma_client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
-    chroma_collection = chroma_client.get_or_create_collection(name="similarity_chunks")
-    print("Connected to ChromaDB")
-except Exception as e:
-    print(f"Warning: Failed to connect to ChromaDB: {e}")
-    chroma_collection = None
+chroma_collection = None
+
+def get_chroma_collection():
+    global chroma_collection
+    if chroma_collection is not None:
+        return chroma_collection
+    try:
+        chroma_host = os.environ.get('CHROMA_HOST', '127.0.0.1')
+        chroma_port = int(os.environ.get('CHROMA_PORT', '8000'))
+        chroma_client = chromadb.HttpClient(host=chroma_host, port=chroma_port)
+        chroma_collection = chroma_client.get_or_create_collection(name="similarity_chunks")
+        print("Successfully linked to ChromaDB Vectors!")
+        return chroma_collection
+    except Exception as e:
+        print(f"Warning: Failed to connect to ChromaDB: {e}")
+        return None
 
 class CompareGroupRequest(BaseModel):
     hashes: List[str]
-    filenames: dict
+    filenames: dict # map hash -> filename
+    pairs: Optional[List[List[str]]] = None # Explicit pairs to compute, avoids N*N loop
 
 @app.post("/compare-group", response_model=BatchResponse)
 def compare_group(request: CompareGroupRequest):
     if not checker:
         raise HTTPException(status_code=503, detail="Model not initialized")
-    if not chroma_collection:
+        
+    collection = get_chroma_collection()
+    if not collection:
         raise HTTPException(status_code=503, detail="ChromaDB not connected")
 
     hashes = request.hashes
     if not hashes:
         return BatchResponse(results=[])
 
+    # fetching chunks from Chroma
     try:
-        results = chroma_collection.get(where={"file_hash": {"$in": hashes}}, include=["embeddings", "metadatas"])
+        results = collection.get(where={"file_hash": {"$in": hashes}}, include=["embeddings", "metadatas"])
     except Exception as e:
         print(f"Chroma Query Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -197,6 +212,7 @@ def compare_group(request: CompareGroupRequest):
     if not results['ids']:
         return BatchResponse(results=[])
 
+    # reconstruct every files data -> file_data[hash] = { 'vectors': Tensor, 'chunks_meta': List[dict] }
     temp_storage = {}
     for i, _id in enumerate(results['ids']):
         meta = results['metadatas'][i]
@@ -208,6 +224,7 @@ def compare_group(request: CompareGroupRequest):
         
         temp_storage[h].append({'index': meta['chunk_index'], 'vector': vector, 'meta': meta})
 
+    # Sort and stack
     file_data = {}
     for h, items in temp_storage.items():
         items.sort(key=lambda x: x['index'])
@@ -220,13 +237,22 @@ def compare_group(request: CompareGroupRequest):
         file_data[h] = {'vectors': vectors, 'chunks_meta': chunks_meta}
 
     comparison_results = []
-    unique_hashes = list(file_data.keys())
-    n = len(unique_hashes)
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            h1 = unique_hashes[i]
-            h2 = unique_hashes[j]
+    
+    # the pairs of files are provided by the server 
+    # if not, compute n vs n pairs
+    if request.pairs:
+        for pair in request.pairs:
+            if len(pair) != 2: continue
+            h1, h2 = pair[0], pair[1]
+            
+            # Skip if chromadb didn't return one of the files
+            if h1 not in file_data or h2 not in file_data:
+                if h1 not in file_data:
+                    print(f"Warning: File {h1} not found in ChromaDB")
+                if h2 not in file_data:
+                    print(f"Warning: File {h2} not found in ChromaDB")
+                continue
+                
             data1 = file_data[h1]
             data2 = file_data[h2]
             
@@ -243,6 +269,31 @@ def compare_group(request: CompareGroupRequest):
                 score=score,
                 regions=[Region(**r) for r in regions]
             ))
+    else:
+        # Fallback to computing all pairs if none were explicitly requested
+        unique_hashes = list(file_data.keys())
+        n = len(unique_hashes)
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                h1 = unique_hashes[i]
+                h2 = unique_hashes[j]
+                data1 = file_data[h1]
+                data2 = file_data[h2]
+                
+                score = checker.compare_documents(data1['vectors'], data2['vectors'])
+                
+                regions = checker.get_regions_with_chunks(
+                    data1['chunks_meta'], data2['chunks_meta'],
+                    data1['vectors'], data2['vectors'], 0.6, 0.5
+                )
+                
+                comparison_results.append(BatchComparisonResult(
+                    file1=request.filenames.get(h1, "Unknown"),
+                    file2=request.filenames.get(h2, "Unknown"),
+                    score=score,
+                    regions=[Region(**r) for r in regions]
+                ))
 
     return BatchResponse(results=comparison_results)
 

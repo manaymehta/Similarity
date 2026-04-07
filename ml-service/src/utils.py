@@ -12,6 +12,7 @@ from src.model import SiameseNetwork
 from src.inference import PlagiarismChecker
 
 def load_submissions_from_folder(folder_path):
+    # Reads all .txt files from the specified folder. Returns dictionary: {'filename': 'content'}
     submissions = {}
     search_path = os.path.join(folder_path, "*.txt")
     files = glob.glob(search_path)
@@ -72,6 +73,7 @@ def print_regions(checker, text_a, text_b, filename_a, filename_b, high_thresh=0
         score = region['score']
         print(f"\nRegion #{i+1} (Avg Score: {score:.4f})")
         
+        # Document A
         start_a, end_a = region['a_start'], region['a_end']
         print(f"{filename_a} Chunks {start_a}-{end_a}")
         region_text_a = " ".join([c['text'] for c in chunks_a[start_a : end_a+1]])

@@ -17,6 +17,7 @@ export const GroupList: React.FC = () => {
     };
 
     useEffect(() => {
+        // eslint-disable-next-line
         loadGroups();
     }, []);
 

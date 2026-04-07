@@ -38,10 +38,12 @@ export const Home: React.FC = () => {
             const group = await createGroup(selectedFiles, groupName);
             // Navigate to report page (using group ID as scan ID)
             navigate(`/report/${group._id}`);
-        } catch (err: any) {
+        } catch (err) {
             console.error("Upload failed", err);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const error = err as any;
             setError(
-                err.response?.data?.message || "Failed to create group. Please try again."
+                error.response?.data?.message || "Failed to create group. Please try again."
             );
             setIsUploading(false);
         }

@@ -16,7 +16,7 @@ export interface IComparisonResult extends Document {
     file1: string;
     file2: string;
     score: number;
-    regions: any[];
+    regions: typeof RegionSchema[];
 }
 
 const ComparisonResultSchema = new Schema<IComparisonResult>({
