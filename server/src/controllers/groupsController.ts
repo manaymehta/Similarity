@@ -182,6 +182,14 @@ export const deleteGroup = async (req: Request, res: Response) => {
                     console.error(`Failed to delete vectors for hash ${hash}:`, chromaError);
                 }
 
+                // purge all redis pair cache entries that reference this hash
+                // key format is pair:hashA:hashB (sorted), so hash could appear in either position
+                const staleKeys = await redisClient.keys(`pair:*${hash}*`);
+                if (staleKeys.length > 0) {
+                    await redisClient.del(...staleKeys);
+                    console.log(`[Cleanup] Purged ${staleKeys.length} stale Redis pair(s) for hash: ${hash.slice(0, 8)}...`);
+                }
+
                 console.log(`[Cleanup] Deleted orphaned file data for hash: ${hash}`);
                 cleanedCount++;
             }

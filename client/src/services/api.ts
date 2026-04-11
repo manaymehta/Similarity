@@ -9,6 +9,12 @@ export interface Group {
     createdAt: string;
 }
 
+export interface SystemMetrics {
+    mongodb: { groups: number; documents: number };
+    chromadb: { chunks: number };
+    redis: { totalPairsCached: number; pairs: Array<{ key: string; file1: string; file2: string; ttl: number }> };
+}
+
 export interface Region {
     a_start: number;
     a_end: number;
@@ -113,6 +119,14 @@ export const addFilesToGroup = async (groupId: string, files: File[]): Promise<G
             'Content-Type': 'multipart/form-data',
         },
     });
+    return response.data;
+};
+
+/**
+ * Get system metrics for databases.
+ */
+export const getSystemMetrics = async (): Promise<SystemMetrics> => {
+    const response = await apiClient.get<SystemMetrics>('/system/stats');
     return response.data;
 };
 
