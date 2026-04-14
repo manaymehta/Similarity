@@ -5,26 +5,7 @@ import { computeHash } from '../utils/hash.js';
 import { getChromaCollection } from '../utils/chromaClient.js';
 import axios from 'axios';
 import redisClient from '../config/redis.js';
-
-// time to live for the pair cache in seconds
-const PAIR_CACHE_TTL = 7 * 24 * 3600;
-
-// same redis key for a file pair regardless of argument order
-function pairCacheKey(hashA: string, hashB: string): string {
-    return `pair:${[hashA, hashB].sort().join(':')}`;
-    // output: pair:hash1:hash2, pair is just a prefix to identify the key
-}
-
-// Generates all unique N*(N-1)/2 pairs from an array of hashes.
-function generateAllPairs(hashes: string[]): Array<[string, string]> {
-    const pairs: Array<[string, string]> = [];
-    for (let i = 0; i < hashes.length; i++) {
-        for (let j = i + 1; j < hashes.length; j++) {
-            pairs.push([hashes[i]!, hashes[j]!]);
-        }
-    }
-    return pairs;
-}
+import { comparisonQueue } from '../queues/comparisonQueue.js';
 
 interface MLChunk {
     vector: number[];
@@ -326,8 +307,6 @@ export const getFileContent = async (req: Request, res: Response) => {
     }
 };
 
-// file A is compared with file B and result is stored in redis as independent pair (A,B)
-// allows cross-group reuse
 export const getGroupResults = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
@@ -337,105 +316,20 @@ export const getGroupResults = async (req: Request, res: Response) => {
             return;
         }
 
-        const uniqueHashes = [...new Set(group.files.map(f => f.hash))];
-
-        if (uniqueHashes.length < 2) {
-            res.json([]);
-            return;
-        }
-
-        // hash <-> filename
-        const hashToFilename: Record<string, string> = {};
-        const filenameToHash: Record<string, string> = {};
-        group.files.forEach(f => {
-            hashToFilename[f.hash] = f.filename;
-            filenameToHash[f.filename] = f.hash;
+        // Add a job to the comparison queue
+        const job = await comparisonQueue.add('compare-group', { groupId: id }, {
+            jobId: `group-compare-${id}`, // Idempotent job ID based on group ID
+            removeOnComplete: { age: 3600 }, // Keep completed jobs in Redis for 1 hour
+            removeOnFail: { age: 3600 }
         });
 
-        // pair generation
-        const allPairs = generateAllPairs(uniqueHashes);
-        const cacheKeys = allPairs.map(([a, b]) => pairCacheKey(a, b));
-
-        // one redis network round trip for all pairs
-        // mget returns an array in the same order as the keys
-        // null = cache miss, string = cache hit
-        const cachedValues = await redisClient.mget(...cacheKeys); // output - ["result1", null, "result3", ...]
-
-        // separate hits from misses
-        const finalResults: unknown[] = [];
-        const missingPairHashes = new Set<string>(); // files involved in at least one miss
-        const missingPairsToCompute: Array<[string, string]> = []; // exactly which pairs need computation
-
-        cachedValues.forEach((val: string | null, idx: number) => {
-            if (val !== null) {
-                // cache hit, add to results directly
-                finalResults.push(JSON.parse(val));
-            } else {
-                // cache miss, store exactly which pair missed
-                const [hashA, hashB] = allPairs[idx]!;
-                missingPairHashes.add(hashA);
-                missingPairHashes.add(hashB);
-                missingPairsToCompute.push([hashA, hashB]);
-            }
+        res.json({ 
+            jobId: job.id, 
+            message: 'Comparison job enqueued' 
         });
-
-        // full cache hit, every pair found, no computation needed
-        if (missingPairHashes.size === 0) {
-            console.log(`[Redis] Full cache hit, all ${allPairs.length} pairs served for group ${id}`);
-            res.json(finalResults);
-            return;
-        }
-
-        const hitCount = cachedValues.filter((v: string | null) => v !== null).length;
-        console.log(`[Redis] Partial cache hit — ${hitCount}/${allPairs.length} pairs cached. Running ML for ${missingPairsToCompute.length} missing pairs...`);
-
-        // extract just the files needed so Chroma only fetches relevant vectors
-        const missingHashArray = [...missingPairHashes];
-        const fileNames: Record<string, string> = {};
-        missingHashArray.forEach(h => {
-            fileNames[h] = hashToFilename[h] ?? h;
-        });
-
-        try {
-            const mlUrl = process.env.ML_SERVICE_URL || 'http://ml-service:5001';
-            const mlResponse = await axios.post(`${mlUrl}/compare-group`, {
-                hashes: missingHashArray, // for fetching vectors from chromadb
-                filenames: fileNames,
-                pairs: missingPairsToCompute // the pairs to be calculated when cache miss
-            });
-
-            // ml-service returns results with file1/file2 as filenames
-            // reverse map back to hashes to build the pair cache key
-            type MLResult = { file1: string; file2: string; score: number; regions: unknown[] };
-            const newResults: MLResult[] = mlResponse.data.results;
-            console.log(`[ML] Returned ${newResults.length} new pair results`);
-
-
-            // stores all new pairs in redis, adds them to final res
-            // does this in parallel, doesn't wait for one to finish before starting next
-            // Promise.all takes an array of promises, returns a new promise that resolves when all of the input promises have resolved
-            await Promise.all(
-                newResults.map(result => {
-                    const hashA = filenameToHash[result.file1];
-                    const hashB = filenameToHash[result.file2];
-                    if (!hashA || !hashB) return Promise.resolve();
-                    const key = pairCacheKey(hashA, hashB);
-                    finalResults.push(result);
-                    // setex = SET + EXpiry 
-                    return redisClient.setex(key, PAIR_CACHE_TTL, JSON.stringify(result));
-                })
-            );
-
-            console.log(`[Redis] Stored ${newResults.length} pair results (TTL: 7 days)`);
-            res.json(finalResults);
-
-        } catch (mlError) {
-            console.error('ml-service comparison failed:', mlError);
-            res.status(502).json({ message: 'Failed to communicate with compare-group service' });
-        }
 
     } catch (error) {
-        console.error('Comparison Error:', error);
-        res.status(500).json({ message: 'Error calculating comparison' });
+        console.error('Enqueue Error:', error);
+        res.status(500).json({ message: 'Error enqueuing comparison job' });
     }
 };

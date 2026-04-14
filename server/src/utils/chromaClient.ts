@@ -12,7 +12,7 @@ class NoOpEmbeddingFunction implements EmbeddingFunction {
     public async generate(): Promise<number[][]> {
         throw new Error("NoOpEmbeddingFunction: Embeddings should be provided manually.");
     }
-}
+} // so why it is still kept in the file is because it is required by the ChromaClient constructor
 
 let collection: Collection | null = null;
 

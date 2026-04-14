@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGroupDetails, getGroupResults, getFileContent, addFilesToGroup, type ComparisonResult, type Group } from '../services/api';
+import { getGroupDetails, startComparison, getJobStatus, getFileContent, addFilesToGroup, type ComparisonResult, type Group } from '../services/api';
 import { Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft, Plus } from 'lucide-react';
 import { Heatmap } from '../components/visualization/Heatmap';
 import { SideBySideViewer } from '../components/visualization/SideBySideViewer';
@@ -15,6 +15,11 @@ export const Report: React.FC = () => {
 
     const [results, setResults] = useState<ComparisonResult[]>([]);
     const [resultsLoading, setResultsLoading] = useState(false);
+    
+    // Polling states
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [jobProgress, setJobProgress] = useState<number | object>(0);
+    const [jobState, setJobState] = useState<string>('waiting');
 
     const [selectedComparison, setSelectedComparison] = useState<ComparisonResult | null>(null);
     const [fileContent1, setFileContent1] = useState<string>("");
@@ -30,17 +35,47 @@ export const Report: React.FC = () => {
 
             if (groupData._id) {
                 setResultsLoading(true);
-                const resultsData = await getGroupResults(scanId);
-                setResults(resultsData);
+                const { jobId: newJobId } = await startComparison(scanId);
+                setJobId(newJobId);
             }
         } catch (err) {
             console.error("Failed to load report", err);
             setStatusError("Failed to load group details.");
+            setResultsLoading(false);
         } finally {
             setStatusLoading(false);
-            setResultsLoading(false);
         }
     }, [scanId]);
+
+    // Polling effect
+    useEffect(() => {
+        if (!jobId) return;
+
+        const intervalId = setInterval(async () => {
+            try {
+                const status = await getJobStatus(jobId);
+                setJobState(status.state);
+                setJobProgress(status.progress);
+
+                if (status.state === 'completed' && status.result) {
+                    setResults(status.result);
+                    setResultsLoading(false);
+                    setJobId(null);
+                    clearInterval(intervalId);
+                } else if (status.state === 'failed') {
+                    console.error("Job failed", status.failedReason);
+                    setStatusError("Comparison failed.");
+                    setResultsLoading(false);
+                    setJobId(null);
+                    clearInterval(intervalId);
+                }
+            } catch (err) {
+                console.error("Failed to poll status", err);
+            }
+        }, 1000);
+
+        return () => clearInterval(intervalId);
+    }, [jobId]);
 
     useEffect(() => {
         loadData();
@@ -83,11 +118,20 @@ export const Report: React.FC = () => {
     };
 
     if (statusLoading || resultsLoading) {
+        let loadingText = 'Loading report...';
+        if (jobState === 'active') {
+            const step = typeof jobProgress === 'object' ? (jobProgress as any).step : 'Running...';
+            const pct = typeof jobProgress === 'object' ? (jobProgress as any).percent : jobProgress;
+            loadingText = `Analyzing Documents: ${step} (${pct}%)`;
+        } else if (jobState === 'waiting') {
+            loadingText = 'Queued for analysis...';
+        }
+
         return (
             <div className="min-h-screen flex flex-col items-center justify-center space-y-4">
                 <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
                 <p className="text-slate-400 text-lg animate-pulse">
-                    Loading report...
+                    {loadingText}
                 </p>
             </div>
         );

@@ -36,6 +36,14 @@ export interface ComparisonResult {
     regions: Region[];
 }
 
+export interface JobStatus {
+    id: string;
+    state: 'waiting' | 'active' | 'completed' | 'failed' | 'delayed' | string;
+    progress: number | object;
+    result: ComparisonResult[] | null;
+    failedReason?: string;
+}
+
 // --- API Client ---
 const apiClient = axios.create({
     // Direct link to the backend container (exposed on host port 5000)
@@ -80,10 +88,18 @@ export const getGroupDetails = async (groupId: string): Promise<Group> => {
 };
 
 /**
- * Get the results for a group.
+ * Start or retrieve the job ID for a group comparison.
  */
-export const getGroupResults = async (groupId: string): Promise<ComparisonResult[]> => {
-    const response = await apiClient.get<ComparisonResult[]>(`/groups/${groupId}/results`);
+export const startComparison = async (groupId: string): Promise<{ jobId: string; message: string }> => {
+    const response = await apiClient.get<{ jobId: string; message: string }>(`/groups/${groupId}/results`);
+    return response.data;
+};
+
+/**
+ * Poll for job status.
+ */
+export const getJobStatus = async (jobId: string): Promise<JobStatus> => {
+    const response = await apiClient.get<JobStatus>(`/jobs/${jobId}/status`);
     return response.data;
 };
 
