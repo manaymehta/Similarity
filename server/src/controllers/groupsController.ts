@@ -3,6 +3,7 @@ import Group from '../models/Group.js';
 import Document from '../models/Document.js';
 import { computeHash } from '../utils/hash.js';
 import { getChromaCollection } from '../utils/chromaClient.js';
+import { extractText } from '../utils/fileParser.js';
 import axios from 'axios';
 import redisClient from '../config/redis.js';
 import { comparisonQueue } from '../queues/comparisonQueue.js';
@@ -34,7 +35,7 @@ export const createGroup = async (req: Request, res: Response) => {
         const chromadb = await getChromaCollection();
 
         for (const file of files) {
-            const content = file.buffer.toString('utf-8');
+            const content = await extractText(file.buffer, file.originalname);
             const hash = computeHash(content);
 
             const existingDoc = await Document.findOne({ hash });
@@ -204,7 +205,7 @@ export const addFilesToGroup = async (req: Request, res: Response) => {
         const newProcessedFiles: { hash: string; filename: string }[] = [];
 
         for (const file of files) {
-            const content = file.buffer.toString('utf-8');
+            const content = await extractText(file.buffer, file.originalname);
             const hash = computeHash(content);
 
             if (group.files.some(f => f.hash === hash)) {
@@ -304,6 +305,51 @@ export const getFileContent = async (req: Request, res: Response) => {
 
     } catch (error) {
         res.status(500).json({ message: 'Error fetching file content', error: error });
+    }
+};
+
+export const crossGroupSearch = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { fileHash } = req.query;
+
+        if (!fileHash || typeof fileHash !== 'string') {
+            res.status(400).json({ message: 'fileHash query param is required' });
+            return;
+        }
+
+        const group = await Group.findById(id);
+        if (!group) {
+            res.status(404).json({ message: 'Group not found' });
+            return;
+        }
+
+        const excludeHashes = group.files.map(f => f.hash);
+        const mlUrl = process.env.ML_SERVICE_URL || 'http://ml-service:5001';
+
+        const mlRes = await axios.post<{ results: { hash: string; score: number }[] }>(
+            `${mlUrl}/cross-search`,
+            { query_hash: fileHash, exclude_hashes: excludeHashes, n_results: 5 }
+        );
+
+        const enriched = await Promise.all(
+            mlRes.data.results.map(async ({ hash, score }) => {
+                const doc = await Document.findOne({ hash });
+                const ownerGroup = await Group.findOne({ 'files.hash': hash });
+                return {
+                    hash,
+                    score,
+                    filename: doc?.filename ?? 'Unknown',
+                    groupName: ownerGroup?.name ?? 'Unknown',
+                    groupId: ownerGroup?._id?.toString() ?? '',
+                };
+            })
+        );
+
+        res.json(enriched);
+    } catch (error) {
+        console.error('Cross-search Error:', error);
+        res.status(500).json({ message: 'Error performing cross-group search' });
     }
 };
 

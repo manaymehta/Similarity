@@ -15,12 +15,16 @@ export interface SystemMetrics {
     redis: { totalPairsCached: number; pairs: Array<{ key: string; file1: string; file2: string; ttl: number }> };
 }
 
+export type MatchType = 'verbatim' | 'paraphrase' | 'similar';
+
 export interface Region {
     a_start: number;
     a_end: number;
     b_start: number;
     b_end: number;
     score: number;
+    lexical_score: number;
+    match_type: MatchType;
     text_a: string;
     text_b: string;
     a_start_char: number;
@@ -34,6 +38,14 @@ export interface ComparisonResult {
     file2: string;
     score: number;
     regions: Region[];
+}
+
+export interface CrossSearchResult {
+    hash: string;
+    score: number;
+    filename: string;
+    groupName: string;
+    groupId: string;
 }
 
 export interface JobStatus {
@@ -134,6 +146,16 @@ export const addFilesToGroup = async (groupId: string, files: File[]): Promise<G
         headers: {
             'Content-Type': 'multipart/form-data',
         },
+    });
+    return response.data;
+};
+
+/**
+ * Cross-group ANN search: find files in other groups similar to a given file.
+ */
+export const crossGroupSearch = async (groupId: string, fileHash: string): Promise<CrossSearchResult[]> => {
+    const response = await apiClient.get<CrossSearchResult[]>(`/groups/${groupId}/cross-search`, {
+        params: { fileHash },
     });
     return response.data;
 };

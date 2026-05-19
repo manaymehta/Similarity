@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { createGroup, getGroups, getGroupDetails, getGroupResults, getFileContent, deleteGroup, addFilesToGroup } from '../controllers/groupsController.js';
+import { createGroup, getGroups, getGroupDetails, getGroupResults, getFileContent, deleteGroup, addFilesToGroup, crossGroupSearch } from '../controllers/groupsController.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -22,6 +22,9 @@ router.get('/:id/results', getGroupResults);
 
 // delete group
 router.delete('/:id', deleteGroup);
+
+// cross-group ANN search for a specific file
+router.get('/:id/cross-search', crossGroupSearch);
 
 // add files to group
 router.post('/:id/files', upload.array('files'), addFilesToGroup);

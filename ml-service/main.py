@@ -1,9 +1,13 @@
 import os
+import time
+import logging
+from collections import deque
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
 import chromadb
+import numpy as np
 
 from dotenv import load_dotenv
 
@@ -12,10 +16,17 @@ try:
     import torch.nn.functional as F
     USE_TORCH = True
 except ImportError:
-    import numpy as np
     USE_TORCH = False
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+_recent_requests: deque = deque(maxlen=100)
+
+def _log_request(endpoint: str, **kwargs):
+    _recent_requests.append({"endpoint": endpoint, "ts": time.time(), **kwargs})
 
 from src.utils import create_checker
 
@@ -33,6 +44,8 @@ class Region(BaseModel):
     b_start: int
     b_end: int
     score: float
+    lexical_score: float
+    match_type: str  # "verbatim" | "paraphrase" | "similar"
     text_a: str
     text_b: str
     a_start_char: int
@@ -54,6 +67,10 @@ app = FastAPI()
 def health_check():
     return {"status": "ok", "model_loaded": checker is not None, "engine": "PyTorch" if USE_TORCH else "ONNX/Numpy"}
 
+@app.get("/metrics")
+def get_metrics():
+    return {"recent_requests": list(_recent_requests), "count": len(_recent_requests)}
+
 @app.post("/compare", response_model=SimilarityResponse)
 def compare_documents(request: CompareRequest):
     if not checker:
@@ -68,7 +85,7 @@ def compare_documents(request: CompareRequest):
     score = checker.compare_documents(vec_a, vec_b)
     
     # regions
-    processed_regions_dicts = checker.get_regions_with_text(doc_a, doc_b, high_threshold=0.6, low_threshold=0.5)
+    processed_regions_dicts = checker.get_regions_with_text(doc_a, doc_b)
     processed_regions = [Region(**r) for r in processed_regions_dicts]
     
     return SimilarityResponse(score=score, regions=processed_regions)
@@ -91,11 +108,12 @@ class EncodeResponse(BaseModel):
 def encode_document_chunks(request: EncodeRequest):
     if not checker:
         raise HTTPException(status_code=503, detail="Model not initialized")
-    
+
+    t0 = time.time()
     doc_content = request.document.content
     chunks_meta = checker.chunk_text(doc_content)
     response_chunks = []
-    
+
     if USE_TORCH:
         with torch.no_grad():
             for i, meta in enumerate(chunks_meta):
@@ -123,7 +141,8 @@ def encode_document_chunks(request: EncodeRequest):
             vec_list = vector[0].tolist()
 
             response_chunks.append(ChunkData(vector=vec_list, text=meta['text'], chunk_index=i, start_char=meta['start_char'], end_char=meta['end_char']))
-            
+
+    _log_request("encode", filename=request.document.filename, words_in=len(doc_content.split()), chunks_out=len(response_chunks), duration_ms=round((time.time() - t0) * 1000))
     return EncodeResponse(chunks=response_chunks)
 
 class BatchRequest(BaseModel):
@@ -160,7 +179,7 @@ def batch_compare_documents(request: BatchRequest):
             vec_b = embeddings[doc_b.filename]
             
             score = checker.compare_documents(vec_a, vec_b)
-            regions_dicts = checker.get_regions_with_text(doc_a.content, doc_b.content, 0.6, 0.5)
+            regions_dicts = checker.get_regions_with_text(doc_a.content, doc_b.content)
             regions = [Region(**r) for r in regions_dicts]
             
             results.append(BatchComparisonResult(file1=doc_a.filename, file2=doc_b.filename, score=score, regions=regions))
@@ -189,11 +208,63 @@ class CompareGroupRequest(BaseModel):
     filenames: dict # map hash -> filename
     pairs: Optional[List[List[str]]] = None # Explicit pairs to compute, avoids N*N loop
 
+class CrossSearchRequest(BaseModel):
+    query_hash: str
+    exclude_hashes: List[str]
+    n_results: int = 5
+
+@app.post("/cross-search")
+def cross_group_search(request: CrossSearchRequest):
+    if not checker:
+        raise HTTPException(status_code=503, detail="Model not initialized")
+
+    collection = get_chroma_collection()
+    if not collection:
+        raise HTTPException(status_code=503, detail="ChromaDB not connected")
+
+    try:
+        query_data = collection.get(
+            where={"file_hash": request.query_hash},
+            include=["embeddings"]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not query_data['ids']:
+        raise HTTPException(status_code=404, detail="Query file not found in ChromaDB")
+
+    vectors = np.array(query_data['embeddings'], dtype=np.float32)
+    mean_vector = vectors.mean(axis=0).tolist()
+
+    all_excludes = list(set(request.exclude_hashes + [request.query_hash]))
+
+    try:
+        search_results = collection.query(
+            query_embeddings=[mean_vector],
+            n_results=50,
+            where={"file_hash": {"$nin": all_excludes}},
+            include=["distances", "metadatas"]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    file_scores: dict = {}
+    for i, meta in enumerate(search_results['metadatas'][0]):
+        h = meta['file_hash']
+        dist = search_results['distances'][0][i]
+        sim = max(0.0, 1.0 - dist / 2.0)
+        if h not in file_scores or sim > file_scores[h]:
+            file_scores[h] = sim
+
+    top_files = sorted(file_scores.items(), key=lambda x: x[1], reverse=True)[:request.n_results]
+    return {"results": [{"hash": h, "score": s} for h, s in top_files]}
+
 @app.post("/compare-group", response_model=BatchResponse)
 def compare_group(request: CompareGroupRequest):
     if not checker:
         raise HTTPException(status_code=503, detail="Model not initialized")
-        
+
+    t0 = time.time()
     collection = get_chroma_collection()
     if not collection:
         raise HTTPException(status_code=503, detail="ChromaDB not connected")
@@ -260,7 +331,7 @@ def compare_group(request: CompareGroupRequest):
             
             regions = checker.get_regions_with_chunks(
                 data1['chunks_meta'], data2['chunks_meta'],
-                data1['vectors'], data2['vectors'], 0.6, 0.5
+                data1['vectors'], data2['vectors']
             )
             
             comparison_results.append(BatchComparisonResult(
@@ -285,7 +356,7 @@ def compare_group(request: CompareGroupRequest):
                 
                 regions = checker.get_regions_with_chunks(
                     data1['chunks_meta'], data2['chunks_meta'],
-                    data1['vectors'], data2['vectors'], 0.6, 0.5
+                    data1['vectors'], data2['vectors']
                 )
                 
                 comparison_results.append(BatchComparisonResult(
@@ -295,6 +366,8 @@ def compare_group(request: CompareGroupRequest):
                     regions=[Region(**r) for r in regions]
                 ))
 
+    pairs_computed = len(comparison_results)
+    _log_request("compare-group", hashes_in=len(hashes), pairs_computed=pairs_computed, duration_ms=round((time.time() - t0) * 1000))
     return BatchResponse(results=comparison_results)
 
 if __name__ == "__main__":

@@ -8,3 +8,4 @@ numpy
 huggingface-hub
 chromadb-client
 transformers
+nltk

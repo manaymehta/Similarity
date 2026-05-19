@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGroupDetails, startComparison, getJobStatus, getFileContent, addFilesToGroup, type ComparisonResult, type Group } from '../services/api';
-import { Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft, Plus } from 'lucide-react';
+import { getGroupDetails, startComparison, getJobStatus, getFileContent, addFilesToGroup, crossGroupSearch, type ComparisonResult, type CrossSearchResult, type Group } from '../services/api';
+import { Loader2, AlertCircle, CheckCircle2, FileText, ArrowLeft, Plus, Search, Globe } from 'lucide-react';
 import { Heatmap } from '../components/visualization/Heatmap';
 import { SideBySideViewer } from '../components/visualization/SideBySideViewer';
 
@@ -21,6 +21,7 @@ export const Report: React.FC = () => {
     const [jobProgress, setJobProgress] = useState<number | object>(0);
     const [jobState, setJobState] = useState<string>('waiting');
 
+    const [searchMode, setSearchMode] = useState<'group' | 'global'>('group');
     const [selectedComparison, setSelectedComparison] = useState<ComparisonResult | null>(null);
     const [fileContent1, setFileContent1] = useState<string>("");
     const [fileContent2, setFileContent2] = useState<string>("");
@@ -210,22 +211,42 @@ export const Report: React.FC = () => {
                 />
             </div>
 
-            {/* Visualizations */}
-            <div className="space-y-6">
-                <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden p-6 relative">
-                    {contentLoading && (
-                        <div className="absolute inset-0 z-10 bg-black/50 backdrop-blur-[1px] flex items-center justify-center">
-                            <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-                        </div>
-                    )}
-                    <h2 className="text-lg font-semibold text-slate-200 mb-4">Similarity Matrix</h2>
-                    <Heatmap
-                        results={results}
-                        filenames={filenames}
-                        onCellClick={handleComparisionSelect}
-                    />
-                </div>
+            {/* Mode Toggle */}
+            <div className="flex gap-2 border-b border-slate-800 pb-0">
+                <button
+                    onClick={() => setSearchMode('group')}
+                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${searchMode === 'group' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}
+                >
+                    <FileText className="w-4 h-4" /> Group Analysis
+                </button>
+                <button
+                    onClick={() => setSearchMode('global')}
+                    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${searchMode === 'global' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'}`}
+                >
+                    <Globe className="w-4 h-4" /> Global Search
+                </button>
             </div>
+
+            {/* Visualizations */}
+            {searchMode === 'group' ? (
+                <div className="space-y-6">
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden p-6 relative">
+                        {contentLoading && (
+                            <div className="absolute inset-0 z-10 bg-black/50 backdrop-blur-[1px] flex items-center justify-center">
+                                <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                            </div>
+                        )}
+                        <h2 className="text-lg font-semibold text-slate-200 mb-4">Similarity Matrix</h2>
+                        <Heatmap
+                            results={results}
+                            filenames={filenames}
+                            onCellClick={handleComparisionSelect}
+                        />
+                    </div>
+                </div>
+            ) : (
+                <GlobalSearchPanel group={group} scanId={scanId!} />
+            )}
 
             {/* Modal */}
             {selectedComparison && (
@@ -236,6 +257,84 @@ export const Report: React.FC = () => {
                     onClose={() => setSelectedComparison(null)}
                 />
             )}
+        </div>
+    );
+};
+
+const GlobalSearchPanel: React.FC<{ group: Group; scanId: string }> = ({ group, scanId }) => {
+    const navigate = useNavigate();
+    const [selectedHash, setSelectedHash] = useState<string | null>(null);
+    const [results, setResults] = useState<CrossSearchResult[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const handleSearch = async (hash: string) => {
+        setSelectedHash(hash);
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await crossGroupSearch(scanId, hash);
+            setResults(data);
+        } catch {
+            setError('Search failed. Make sure other groups have been analyzed.');
+            setResults([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* File list */}
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 space-y-3">
+                <h2 className="text-lg font-semibold text-slate-200 mb-2">Select a file to search globally</h2>
+                {group.files.map(f => (
+                    <button
+                        key={f.hash}
+                        onClick={() => handleSearch(f.hash)}
+                        className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors text-left ${selectedHash === f.hash ? 'border-blue-500 bg-blue-500/10 text-blue-300' : 'border-slate-700 bg-slate-800/50 text-slate-300 hover:border-slate-500 hover:text-white'}`}
+                    >
+                        <span className="flex items-center gap-2 truncate">
+                            <FileText className="w-4 h-4 shrink-0" />
+                            <span className="truncate text-sm">{f.filename}</span>
+                        </span>
+                        <Search className="w-4 h-4 shrink-0 ml-2 text-slate-400" />
+                    </button>
+                ))}
+            </div>
+
+            {/* Results panel */}
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6">
+                <h2 className="text-lg font-semibold text-slate-200 mb-4">Similar files in other groups</h2>
+                {!selectedHash && (
+                    <p className="text-slate-500 text-sm">Select a file on the left to find similar documents across all groups.</p>
+                )}
+                {loading && (
+                    <div className="flex items-center gap-3 text-slate-400">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span className="text-sm">Searching...</span>
+                    </div>
+                )}
+                {error && <p className="text-red-400 text-sm">{error}</p>}
+                {!loading && results.length === 0 && selectedHash && !error && (
+                    <p className="text-slate-500 text-sm">No similar files found in other groups.</p>
+                )}
+                <div className="space-y-3">
+                    {results.map(r => (
+                        <div key={r.hash} className="flex items-center justify-between p-4 bg-slate-800 rounded-lg border border-slate-700">
+                            <div className="min-w-0">
+                                <p className="text-sm font-medium text-white truncate">{r.filename}</p>
+                                <p className="text-xs text-slate-400 mt-0.5 truncate">
+                                    Group: <button onClick={() => navigate(`/report/${r.groupId}`)} className="text-blue-400 hover:underline">{r.groupName}</button>
+                                </p>
+                            </div>
+                            <span className={`ml-4 shrink-0 px-3 py-1 rounded-full text-xs font-bold ${r.score >= 0.75 ? 'bg-red-500/15 text-red-400' : r.score >= 0.55 ? 'bg-orange-500/15 text-orange-400' : 'bg-yellow-500/15 text-yellow-400'}`}>
+                                {(r.score * 100).toFixed(1)}%
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            </div>
         </div>
     );
 };

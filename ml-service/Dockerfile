@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
+# Pre-download NLTK tokenizer data so the container has no outbound network dependency at runtime.
+# punkt_tab is the newer format (NLTK >= 3.8.2); punkt is the older fallback.
+RUN python -c "import nltk; nltk.download('punkt_tab', quiet=True); nltk.download('punkt', quiet=True)"
 # --user installs packages to /root/.local
 # --no-cache-dir - prevents pip from caching the packages, which keeps the image smaller 
 
@@ -31,6 +34,7 @@ WORKDIR /app
 # Copy the pre-compiled Python packages from Phase 1
 # The compilers that built them are left behind and discarded
 COPY --from=builder /root/.local /root/.local
+COPY --from=builder /root/nltk_data /root/nltk_data
 
 COPY . .
 
